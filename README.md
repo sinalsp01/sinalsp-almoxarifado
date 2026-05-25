@@ -1,0 +1,1 @@
+# sinalsp-almoxarifado
