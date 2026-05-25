@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Almoxarifado — Sinal SP</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Almoxarifado">
+<meta name="theme-color" content="#1c1c1e">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link href="https://fonts.googleapis.com/css2?family=Tenor+Sans&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 
 <!-- ══ FIREBASE SDK ══ -->
@@ -471,6 +477,8 @@ window.showLoadingOverlay = showLoadingOverlay;
       <span style="margin-left:auto;background:rgba(52,199,89,.12);color:var(--green);font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px">● ATIVO</span>
     </div>
     <button class="btn btn-ghost" style="border-color:#25D366;color:#25D366" onclick="testAlertWhatsapp()">📱 ENVIAR MENSAGEM DE TESTE</button>
+    <button id="btnInstallApp" class="btn btn-ghost" style="display:none;border-color:var(--accent2);color:var(--text);margin-top:10px" onclick="installApp()">📲 INSTALAR APP NO DISPOSITIVO</button>
+    <button class="btn btn-ghost" style="margin-top:10px;border-color:#7aaddd;color:#7aaddd" onclick="requestNotificationPermission().then(ok => showToast(ok ? '🔔 Notificações ativadas!' : '❌ Permissão negada'))">🔔 ATIVAR NOTIFICAÇÕES</button>
   </div>
 
   <!-- Botão sair -->
@@ -1150,6 +1158,71 @@ function testAlertWhatsapp(){
     showToast('📱 Teste enviado! Verifique o WhatsApp.');
   });
 }
+
+// ── SERVICE WORKER ────────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js')
+      .then(reg => console.log('SW registrado:', reg.scope))
+      .catch(err => console.log('SW erro:', err));
+  });
+}
+
+// ── INSTALL PROMPT (Android) ──────────────────────────────────────
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredPrompt = e;
+  // Mostra botão de instalar no admin
+  const btn = document.getElementById('btnInstallApp');
+  if (btn) btn.style.display = 'block';
+});
+
+function installApp() {
+  if (!deferredPrompt) { showToast('App já instalado ou não disponível'); return; }
+  deferredPrompt.prompt();
+  deferredPrompt.userChoice.then(choice => {
+    if (choice.outcome === 'accepted') showToast('✅ App instalado!');
+    deferredPrompt = null;
+    const btn = document.getElementById('btnInstallApp');
+    if (btn) btn.style.display = 'none';
+  });
+}
+
+// ── NOTIFICAÇÕES ──────────────────────────────────────────────────
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) { showToast('Notificações não suportadas'); return false; }
+  if (Notification.permission === 'granted') return true;
+  const perm = await Notification.requestPermission();
+  return perm === 'granted';
+}
+
+async function showLocalNotification(title, body) {
+  const granted = await requestNotificationPermission();
+  if (!granted) return;
+  if ('serviceWorker' in navigator) {
+    const reg = await navigator.serviceWorker.ready;
+    reg.showNotification(title, {
+      body,
+      icon: 'icon-192.png',
+      badge: 'icon-192.png',
+      vibrate: [200, 100, 200],
+    });
+  } else {
+    new Notification(title, { body, icon: 'icon-192.png' });
+  }
+}
+
+// Sobrescreve sendDamageAlert para também disparar notificação local
+const _origSendDamageAlert = sendDamageAlert;
+window.sendDamageAlert = function(toolName, by, obs, at) {
+  _origSendDamageAlert(toolName, by, obs, at);
+  showLocalNotification(
+    '⚠️ Ferramenta Danificada — Sinal SP',
+    toolName + ' devolvida por ' + by + ' como DANIFICADA.'
+  );
+};
+
 </script>
 </body>
 </html>
