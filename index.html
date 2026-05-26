@@ -1,0 +1,1774 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Almoxarifado — Sinal SP</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Almoxarifado">
+<meta name="theme-color" content="#1c1c1e">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link href="https://fonts.googleapis.com/css2?family=Tenor+Sans&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<!-- ══ FIREBASE SDK ══ -->
+<script type="module">
+// ─────────────────────────────────────────────────────────────────
+//  🔧 CONFIGURAÇÃO FIREBASE — substitua os valores abaixo
+// ─────────────────────────────────────────────────────────────────
+import { initializeApp }                          from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, collection, doc,
+         onSnapshot, setDoc, addDoc, deleteDoc,
+         updateDoc, getDocs, query, orderBy,
+         serverTimestamp }                        from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyBZkhP4P72Eno-XLZbD4c3e4eUguhDaBAc",
+  authDomain:        "sinal-sp-almoxarifado.firebaseapp.com",
+  projectId:        "sinal-sp-almoxarifado",
+  storageBucket:    "sinal-sp-almoxarifado.firebasestorage.app",
+  messagingSenderId: "534453316816",
+  appId:            "1:534453316816:web:e5bb9540d2540f2c2c82d5"
+};
+// ─────────────────────────────────────────────────────────────────
+
+const app = initializeApp(FIREBASE_CONFIG);
+const db  = getFirestore(app);
+
+// ── Coleções ──
+const toolsCol    = collection(db, 'alm_tools');
+const historyCol  = collection(db, 'alm_history');
+const empsCol     = collection(db, 'alm_emps');
+const catsCol     = collection(db, 'alm_cats');
+const insumosCol  = collection(db, 'alm_insumos');
+const ihistoryCol = collection(db, 'alm_ihistory');
+const icatsCol    = collection(db, 'alm_icats');
+
+// ── Cache local (alimentado pelos listeners) ──
+window._tools    = [];
+window._history  = [];
+window._emps     = [];
+window._cats     = [];
+window._insumos  = [];
+window._ihistory = [];
+window._icats    = [];
+
+// ── DB API exposta globalmente ──
+window.DB = {
+  tools:   () => window._tools,
+  history: () => window._history,
+  emps:    () => window._emps,
+  cats:    () => window._cats,
+  insumos:  () => window._insumos,
+  ihistory: () => window._ihistory,
+  icats:    () => window._icats,
+
+  saveInsumo: async (insumo) => {
+    const { id, ...data } = insumo;
+    await setDoc(doc(db, 'alm_insumos', String(id)), data);
+  },
+  deleteInsumo: async (id) => {
+    await deleteDoc(doc(db, 'alm_insumos', String(id)));
+  },
+  addIHistory: async (entry) => {
+    await addDoc(ihistoryCol, { ...entry, _ts: serverTimestamp() });
+  },
+  clearIHistory: async () => {
+    const snap = await getDocs(ihistoryCol);
+    await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+  },
+  saveICats: async (list) => {
+    await setDoc(doc(db, 'alm_icats', 'config'), { list });
+  },
+
+  saveTool: async (tool) => {
+    const { id, ...data } = tool;
+    await setDoc(doc(db, 'alm_tools', String(id)), data);
+  },
+  deleteTool: async (id) => {
+    await deleteDoc(doc(db, 'alm_tools', String(id)));
+  },
+  addHistory: async (entry) => {
+    await addDoc(historyCol, { ...entry, _ts: serverTimestamp() });
+  },
+  clearHistory: async () => {
+    const snap = await getDocs(historyCol);
+    await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+  },
+  saveEmp: async (emp) => {
+    const { id, ...data } = emp;
+    await setDoc(doc(db, 'alm_emps', String(id)), data);
+  },
+  deleteEmp: async (id) => {
+    await deleteDoc(doc(db, 'alm_emps', String(id)));
+  },
+  saveCats: async (list) => {
+    await setDoc(doc(db, 'alm_cats', 'config'), { list });
+  },
+};
+
+// ── Listeners em tempo real ──
+function startListeners() {
+  // Ferramentas
+  onSnapshot(toolsCol, snap => {
+    window._tools = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (typeof renderTools === 'function') renderTools();
+    if (typeof renderAdmin === 'function' && document.getElementById('page-admin').classList.contains('active')) renderAdmin();
+  });
+
+  // Histórico
+  onSnapshot(query(historyCol, orderBy('at', 'asc')), snap => {
+    window._history = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (typeof renderHistory === 'function' && document.getElementById('page-admin').classList.contains('active')) renderHistory();
+  });
+
+  // Funcionários
+  onSnapshot(empsCol, snap => {
+    window._emps = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (typeof renderAdmin === 'function' && document.getElementById('page-admin').classList.contains('active')) renderAdmin();
+  });
+
+  // Insumos
+  onSnapshot(insumosCol, snap => {
+    window._insumos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (typeof renderInsumos === 'function') renderInsumos();
+    if (typeof renderAdminInsumos === 'function' && document.getElementById('page-admin').classList.contains('active')) renderAdminInsumos();
+  });
+
+  // Histórico Insumos
+  onSnapshot(query(ihistoryCol, orderBy('at', 'asc')), snap => {
+    window._ihistory = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (typeof renderIHistory === 'function' && document.getElementById('page-admin').classList.contains('active')) renderIHistory();
+  });
+
+  // Categorias Insumos
+  onSnapshot(doc(db, 'alm_icats', 'config'), snap => {
+    window._icats = snap.exists() ? (snap.data().list || []) : [];
+    if (typeof renderAdminICats === 'function') renderAdminICats();
+    if (typeof renderICatChips  === 'function') renderICatChips();
+  });
+
+  // Categorias Ferramentas
+  onSnapshot(doc(db, 'alm_cats', 'config'), snap => {
+    if (snap.exists()) {
+      window._cats = snap.data().list || [];
+    } else {
+      window._cats = [];
+    }
+    if (typeof renderAdminCats === 'function') renderAdminCats();
+    if (typeof renderCatChips  === 'function') renderCatChips();
+  });
+}
+
+// ── Seed inicial (só se vazio) ──
+async function seedIfEmpty() {
+  const snap = await getDocs(toolsCol);
+  if (snap.empty) {
+    const seeds = [
+      {name:'Serra Circular',   category:'⚡ Elétricas', photo:null,serial:'',obs:'Makita 185mm', status:'ok',outBy:null,outAt:null,outTo:null,outObs:null,damaged:false},
+      {name:'Furadeira de Impacto', category:'⚡ Elétricas', photo:null,serial:'',obs:'DeWalt 13mm', status:'ok',outBy:null,outAt:null,outTo:null,outObs:null,damaged:false},
+      {name:'Trena 5m',         category:'📏 Medição',   photo:null,serial:'',obs:'',              status:'ok',outBy:null,outAt:null,outTo:null,outObs:null,damaged:false},
+    ];
+    await Promise.all(seeds.map((s,i) => setDoc(doc(db,'alm_tools',String(Date.now()+i)), s)));
+  }
+}
+
+// Aguarda DOM pronto, então inicia
+document.addEventListener('DOMContentLoaded', async () => {
+  showLoadingOverlay(true);
+  try {
+    await seedIfEmpty();
+    startListeners();
+    // Pequeno delay para os listeners popularem o cache
+    setTimeout(() => {
+      showLoadingOverlay(false);
+      if (typeof initApp === 'function') initApp();
+    }, 1200);
+  } catch(e) {
+    console.error('Firebase init error:', e);
+    showLoadingOverlay(false, 'Erro ao conectar ao Firebase. Verifique a configuração.');
+  }
+});
+
+function showLoadingOverlay(show, msg) {
+  const el = document.getElementById('loadingOverlay');
+  if (!el) return;
+  if (show) {
+    el.style.display = 'flex';
+    el.querySelector('.load-msg').textContent = msg || 'Conectando...';
+  } else if (msg) {
+    el.querySelector('.load-msg').textContent = msg;
+    el.querySelector('.load-spinner').style.display = 'none';
+  } else {
+    el.style.display = 'none';
+  }
+}
+window.showLoadingOverlay = showLoadingOverlay;
+</script>
+
+<style>
+  :root {
+    --bg:        #1c1c1e;
+    --bg2:       #232325;
+    --surface:   #2c2c2e;
+    --surface2:  #3a3a3c;
+    --border:    #48484a;
+    --border2:   #636366;
+    --accent:    #e5e5e7;
+    --accent2:   #aeaeb2;
+    --red:       #d94f3b;
+    --red-soft:  rgba(217,79,59,.15);
+    --green:     #34c759;
+    --green-soft:rgba(52,199,89,.12);
+    --text:      #f5f5f7;
+    --text2:     #c7c7cc;
+    --muted:     #8e8e93;
+    --radius:    14px;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+  body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; overflow-x:hidden; text-transform:uppercase; }
+  input, textarea, select { text-transform:none; }
+  .tenor { font-family:'Tenor Sans',sans-serif; letter-spacing:.08em; }
+
+  /* Loading overlay */
+  #loadingOverlay {
+    position:fixed; inset:0; z-index:3000; background:var(--bg);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px;
+  }
+  .load-spinner {
+    width:40px; height:40px; border:3px solid var(--border);
+    border-top-color:var(--accent2); border-radius:50%;
+    animation:spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .load-msg { font-size:13px; color:var(--muted); letter-spacing:.1em; }
+
+  /* LOCK SCREEN */
+  #lockScreen {
+    position:fixed; inset:0; z-index:2000; background:var(--bg);
+    display:flex; flex-direction:column; align-items:center;
+    overflow-y:auto;
+  }
+  .lock-logo { width:clamp(160px,40vw,300px); margin-bottom:12px; display:block; }
+  .lock-logo svg { width:100%; height:auto; display:block; }
+  .lock-brand { font-family:'Tenor Sans',sans-serif; font-size:clamp(10px,2vw,13px); letter-spacing:.22em; color:var(--muted); text-transform:uppercase; text-align:center; margin-bottom:0; line-height:1.7; }
+  #lockStep1 { display:flex; flex-direction:column; align-items:center; gap:0; width:100%; }
+  #lockStep2 { display:none; flex-direction:column; align-items:center; gap:0; width:100%; }
+  .lock-header { display:flex; flex-direction:column; align-items:center; margin-bottom:40px; }
+  .lock-back-btn { background:none; border:none; color:var(--muted); font-size:12px; cursor:pointer; letter-spacing:.1em; font-family:"DM Sans"; padding:8px 20px; }
+  .lock-back-btn:hover { color:var(--text); }
+  .lock-touch-area { display:flex; flex-direction:column; align-items:center; gap:16px; cursor:pointer; padding:20px; user-select:none; }
+  .lock-hand-img { width:clamp(70px,18vw,110px); animation:hand-pulse 2s ease-in-out infinite; }
+  .lock-hand-img svg { width:100%; height:auto; display:block; }
+  @keyframes hand-pulse { 0%,100%{ transform:scale(1); opacity:.5; } 50%{ transform:scale(1.08); opacity:1; } }
+  .lock-touch-label { font-size:clamp(11px,2.2vw,13px); letter-spacing:.2em; color:var(--muted); text-transform:uppercase; text-align:center; font-weight:500; }
+  .lock-actions { display:grid; grid-template-columns:1fr 1fr; gap:14px; width:100%; max-width:480px; margin-top:32px; }
+  .lock-action-card { background:var(--surface); border:1px solid var(--border); border-radius:18px; padding:36px 20px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0; cursor:pointer; transition:transform .15s, background .15s, border-color .15s; user-select:none; position:relative; overflow:hidden; min-height:100px; }
+  .lock-action-card::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; }
+  .lock-action-card.retirar::before { background:var(--red); }
+  .lock-action-card.devolver::before { background:var(--green); }
+  .lock-action-card:active { transform:scale(.97); }
+  .lock-action-card:hover { background:var(--surface2); }
+  .lock-action-card.retirar:hover { border-color:var(--red); }
+  .lock-action-card.devolver:hover { border-color:var(--green); }
+  .lock-action-label { font-size:20px; font-weight:700; text-transform:uppercase; color:var(--text); letter-spacing:.12em; text-align:center; width:100%; }
+
+  /* APP */
+  #app { display:none; }
+  header { background:var(--surface); border-bottom:1px solid var(--border); padding:14px 20px; display:flex; align-items:center; gap:14px; position:sticky; top:0; z-index:100; }
+  .header-logo { height:44px; display:flex; align-items:center; } .header-logo svg { height:44px; width:auto; }
+  .clock-wrap { text-align:right; }
+  .clock-time { font-family:'DM Mono'; font-size:15px; color:var(--text); }
+  .clock-date { font-size:11px; color:var(--muted); }
+  .btn-admin { background:none; border:1px solid var(--border); color:var(--muted); padding:8px 10px; border-radius:8px; font-size:18px; cursor:pointer; line-height:1; transition:all .2s; }
+  .btn-admin:hover { border-color:var(--accent2); color:var(--text); }
+
+  /* Indicador de conexão */
+  .sync-dot { width:8px; height:8px; border-radius:50%; background:var(--green); flex-shrink:0; }
+  .sync-dot.offline { background:var(--red); }
+
+  .tabs { display:flex; background:var(--surface); border-bottom:1px solid var(--border); overflow-x:auto; scrollbar-width:none; }
+  .tabs::-webkit-scrollbar { display:none; }
+  .tab { flex:1; min-width:120px; padding:13px 20px; text-align:center; font-size:13px; font-weight:500; color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; transition:all .2s; white-space:nowrap; letter-spacing:.03em; }
+  .tab.active { color:var(--text); border-bottom-color:var(--text); }
+  .page { display:none; padding:20px; padding-bottom:80px; }
+  .page.active { display:block; }
+  .sec-title { font-size:13px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-bottom:18px; }
+  .search-bar { display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; }
+  .search-bar input, .search-bar select { background:var(--surface); border:1px solid var(--border); color:var(--text); padding:10px 14px; border-radius:10px; font-family:'DM Sans'; font-size:14px; outline:none; flex:1; min-width:140px; transition:border-color .2s; }
+  .search-bar input:focus, .search-bar select:focus { border-color:var(--accent2); }
+  .search-bar select option { background:var(--surface2); }
+  .search-bar input::placeholder { color:var(--muted); }
+  .chips { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px; }
+  .chip { padding:6px 14px; border-radius:20px; font-size:12px; border:1px solid var(--border); color:var(--muted); cursor:pointer; transition:all .2s; }
+  .chip.active { border-color:var(--accent2); color:var(--text); background:var(--surface2); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:12px; }
+  .tool-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px 14px; cursor:pointer; transition:all .2s; position:relative; overflow:hidden; user-select:none; }
+  .tool-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:var(--green); transition:background .2s; }
+  .tool-card.out::before { background:var(--red); }
+  .tool-card:active { transform:scale(.97); }
+  .tool-card:hover { background:var(--surface2); border-color:var(--border2); }
+  .tool-img-wrap { width:100%; aspect-ratio:1; border-radius:8px; overflow:hidden; background:var(--bg2); margin-bottom:10px; display:flex; align-items:center; justify-content:center; }
+  .tool-img-wrap img { width:100%; height:100%; object-fit:cover; }
+  .tool-emoji { font-size:36px; }
+  .tool-name { font-size:13px; font-weight:600; color:var(--text); margin-bottom:3px; }
+  .tool-category { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  .status-badge { display:inline-block; margin-top:8px; padding:3px 10px; border-radius:20px; font-size:11px; font-weight:600; }
+  .badge-ok { background:var(--green-soft); color:var(--green); }
+  .badge-out { background:var(--red-soft); color:var(--red); }
+  .badge-damaged { background:rgba(255,180,0,.12); color:#f0a500; }
+  .tool-card.damaged { cursor:not-allowed; opacity:.75; }
+  .tool-card.muted-card { cursor:not-allowed; opacity:.45; }
+  .tool-card.damaged::before { background:#f0a500; }
+  .tool-damaged-msg { font-size:10px; color:#f0a500; margin-top:5px; font-weight:600; letter-spacing:.03em; line-height:1.3; }
+  .tool-who { font-size:11px; color:var(--muted); margin-top:5px; }
+  .overlay { position:fixed; inset:0; z-index:500; background:rgba(0,0,0,.72); backdrop-filter:blur(6px); display:none; align-items:flex-end; justify-content:center; }
+  .overlay.open { display:flex; }
+  .modal { background:var(--surface); border:1px solid var(--border); border-radius:20px 20px 0 0; padding:28px 24px 44px; width:100%; max-width:560px; max-height:92vh; overflow-y:auto; }
+  .modal-handle { width:40px; height:4px; background:var(--border2); border-radius:2px; margin:0 auto 20px; }
+  .modal-title { font-size:18px; font-weight:600; color:var(--text); margin-bottom:18px; }
+  .modal-tool-name { font-size:17px; font-weight:600; margin-bottom:4px; }
+  .modal-info { font-size:13px; color:var(--muted); margin-bottom:18px; }
+  .form-group { margin-bottom:16px; }
+  .form-group label { display:block; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; margin-bottom:8px; }
+  .form-group input, .form-group select, .form-group textarea { width:100%; background:var(--bg2); border:1px solid var(--border); color:var(--text); padding:12px 14px; border-radius:10px; font-family:'DM Sans'; font-size:15px; outline:none; resize:none; transition:border-color .2s; }
+  .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color:var(--accent2); }
+  .form-group select option { background:var(--surface); }
+  .form-group input::placeholder, .form-group textarea::placeholder { color:var(--muted); }
+  .emp-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(110px,1fr)); gap:8px; }
+  .emp-btn { background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:10px 8px; text-align:center; cursor:pointer; transition:all .2s; font-size:13px; color:var(--text2); font-family:'DM Sans'; }
+  .emp-btn:hover { border-color:var(--accent2); }
+  .emp-btn.selected { border-color:var(--text); background:var(--surface2); color:var(--text); }
+  .emp-btn .emp-icon { font-size:20px; display:block; margin-bottom:4px; }
+  .emp-name-input-wrap { margin-top:10px; }
+  .radio-group { display:flex; gap:8px; flex-wrap:wrap; }
+  .radio-btn { flex:1; min-width:90px; border:1px solid var(--border); border-radius:10px; padding:11px; text-align:center; cursor:pointer; transition:all .2s; font-size:13px; color:var(--muted); }
+  .radio-btn.selected { border-color:var(--accent2); color:var(--text); background:var(--surface2); }
+  .btn { padding:14px 20px; border-radius:12px; font-family:'DM Sans'; font-size:15px; font-weight:600; cursor:pointer; border:none; transition:all .15s; width:100%; margin-top:8px; }
+  .btn-primary { background:var(--accent); color:var(--bg); }
+  .btn-danger { background:var(--red); color:#fff; }
+  .btn-success { background:var(--green); color:#0a0a0a; }
+  .btn-ghost { background:none; border:1px solid var(--border); color:var(--muted); }
+  .btn-ghost:hover { border-color:var(--accent2); color:var(--text); }
+  .btn:active { transform:scale(.98); opacity:.9; }
+  .history-list { display:flex; flex-direction:column; gap:10px; }
+  .hist-item { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:14px 16px; display:flex; gap:12px; }
+  .hist-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; margin-top:5px; }
+  .hist-dot.retirada { background:var(--red); }
+  .hist-dot.devolucao { background:var(--green); }
+  .hist-body { flex:1; }
+  .hist-title { font-size:14px; font-weight:500; }
+  .hist-meta { font-size:12px; color:var(--muted); margin-top:3px; }
+  .hist-tag { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; margin-top:6px; font-weight:500; }
+  .tag-obra { background:rgba(229,229,231,.08); color:var(--accent2); }
+  .tag-empresa { background:rgba(100,160,220,.1); color:#7aaddd; }
+  .admin-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:12px; margin-bottom:24px; }
+  .stat-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:18px; }
+  .stat-num { font-size:36px; font-weight:300; color:var(--text); }
+  .stat-label { font-size:11px; color:var(--muted); margin-top:2px; text-transform:uppercase; letter-spacing:.06em; }
+  .tool-list-admin { display:flex; flex-direction:column; gap:10px; }
+  .tool-row-admin { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; display:flex; align-items:center; gap:12px; }
+  .tool-row-thumb { width:44px; height:44px; border-radius:8px; overflow:hidden; background:var(--bg2); flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:22px; }
+  .tool-row-thumb img { width:100%; height:100%; object-fit:cover; }
+  .tool-row-info { flex:1; }
+  .tool-row-info .n { font-size:14px; font-weight:500; }
+  .tool-row-info .c { font-size:11px; color:var(--muted); }
+  .tool-row-actions { display:flex; gap:8px; }
+  .btn-sm { padding:6px 12px; border-radius:8px; font-size:12px; border:1px solid var(--border); background:none; color:var(--muted); cursor:pointer; font-family:'DM Sans'; transition:all .2s; }
+  .btn-sm:hover { border-color:var(--accent2); color:var(--text); }
+  .btn-sm.del:hover { border-color:var(--red); color:var(--red); }
+  .photo-upload-area { border:2px dashed var(--border2); border-radius:12px; padding:24px; text-align:center; cursor:pointer; transition:border-color .2s; }
+  .photo-upload-area:hover { border-color:var(--accent2); }
+  .photo-preview { width:100%; max-height:200px; object-fit:cover; border-radius:8px; margin-top:10px; display:none; }
+  .emp-list { display:flex; flex-direction:column; gap:8px; }
+  .emp-row { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; display:flex; align-items:center; gap:10px; }
+  .emp-row-icon { font-size:20px; }
+  .emp-row-name { flex:1; font-size:14px; }
+  .pin-display { text-align:center; font-family:'DM Mono'; font-size:32px; letter-spacing:14px; color:var(--text); margin-bottom:24px; min-height:40px; }
+  .pin-pad { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; max-width:260px; margin:0 auto; }
+  .pin-key { background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:18px; text-align:center; font-size:22px; cursor:pointer; transition:all .15s; color:var(--text); font-weight:500; }
+  .pin-key:active { background:var(--border2); transform:scale(.95); }
+  #toast { position:fixed; bottom:28px; left:50%; transform:translateX(-50%) translateY(80px); background:var(--surface2); border:1px solid var(--border2); color:var(--text); padding:12px 24px; border-radius:30px; font-size:13px; z-index:9999; transition:transform .3s; white-space:nowrap; box-shadow:0 8px 30px rgba(0,0,0,.5); }
+  #toast.show { transform:translateX(-50%) translateY(0); }
+  .divider { height:1px; background:var(--border); margin:24px 0; }
+  .empty { text-align:center; padding:52px 20px; color:var(--muted); }
+  .empty .e-icon { font-size:40px; margin-bottom:14px; }
+  .empty p { font-size:14px; }
+
+  .insumo-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px 14px; cursor:pointer; transition:all .2s; position:relative; overflow:hidden; user-select:none; }
+  .insumo-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:var(--accent2); }
+  .insumo-card.low-stock::before { background:#f0a500; }
+  .insumo-card.no-stock::before { background:var(--red); }
+  .insumo-card:active { transform:scale(.97); }
+  .insumo-card:hover { background:var(--surface2); border-color:var(--border2); }
+  .insumo-saldo { font-size:28px; font-weight:300; color:var(--text); line-height:1; margin-bottom:2px; }
+  .insumo-unit { font-size:12px; color:var(--muted); }
+  .insumo-name { font-size:13px; font-weight:600; color:var(--text); margin-top:8px; margin-bottom:2px; }
+  .insumo-cat { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  .badge-lowstock { background:rgba(240,165,0,.12); color:#f0a500; }
+  .badge-nostock { background:var(--red-soft); color:var(--red); }
+  .insumo-row-admin { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; display:flex; align-items:center; gap:12px; }
+  .insumo-row-saldo { font-size:18px; font-weight:600; color:var(--text); min-width:60px; text-align:right; }
+
+  ::-webkit-scrollbar { width:3px; }
+  ::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+  @media(max-width:440px){ .grid { grid-template-columns:repeat(2,1fr); } }
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loadingOverlay">
+  <div class="load-spinner"></div>
+  <div class="load-msg">Conectando...</div>
+</div>
+
+<!-- LOCK SCREEN -->
+<div id="lockScreen" style="display:none">
+
+  <!-- Logo sempre fixo no topo -->
+  <div style="display:flex;flex-direction:column;align-items:center;padding-top:clamp(40px,8vh,80px);padding-bottom:32px">
+    <div style="width:clamp(180px,45vw,320px)"><svg viewBox="0 0 1600 900" xmlns="http://www.w3.org/2000/svg"><g fill="white"><rect x="50" y="305" width="285" height="85" rx="12"/><rect x="75" y="330" width="235" height="35" fill="#1c1c1e"/><rect x="50" y="450" width="285" height="85" rx="12"/><rect x="75" y="475" width="235" height="35" fill="#1c1c1e"/><rect x="50" y="595" width="285" height="85" rx="12"/><rect x="75" y="620" width="235" height="35" fill="#1c1c1e"/></g><text x="420" y="470" font-family="Tenor Sans,Montserrat,Arial,sans-serif" font-size="170" font-weight="300" letter-spacing="28" fill="white">SINAL SP</text><text x="420" y="590" font-family="Tenor Sans,Montserrat,Arial,sans-serif" font-size="52" font-weight="300" letter-spacing="18" fill="white">MARCENARIA CORPORATIVA</text><text x="420" y="675" font-family="Tenor Sans,Montserrat,Arial,sans-serif" font-size="52" font-weight="300" letter-spacing="18" fill="white">E RESIDENCIAL</text></svg></div>
+    <div class="lock-brand tenor" style="margin-top:8px">Marcenaria Corporativa e Residencial</div>
+  </div>
+
+  <!-- Área de conteúdo dinâmico — só um step visível por vez -->
+  <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:0 24px;width:100%;max-width:520px;margin:0 auto">
+
+    <!-- STEP 1: Toque para iniciar -->
+    <div id="lockStep1" style="display:flex;flex-direction:column;align-items:center;gap:16px;width:100%">
+      <div class="lock-touch-area" onclick="showLockStep2()">
+        <div class="lock-hand-img"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none"><circle cx="40" cy="40" r="28" stroke="white" stroke-width="1.5" opacity="0.2"/><circle cx="40" cy="40" r="20" stroke="white" stroke-width="1.5" opacity="0.4"/><circle cx="40" cy="40" r="12" stroke="white" stroke-width="1.5" opacity="0.7"/><circle cx="40" cy="40" r="5" fill="white"/><rect x="36" y="14" width="8" height="22" rx="4" fill="white"/></svg></div>
+        <div class="lock-touch-label">TOQUE PARA INICIAR</div>
+      </div>
+    </div>
+
+    <!-- STEP 2: Ferramentas ou Insumos -->
+    <div id="lockStep2" style="display:none;flex-direction:column;align-items:center;gap:20px;width:100%">
+      <div style="font-size:12px;color:var(--muted);letter-spacing:.18em;margin-bottom:4px">SELECIONE O MÓDULO</div>
+      <div class="lock-actions" style="width:100%">
+        <div class="lock-action-card" style="border-top:3px solid var(--accent2)" onclick="showLockStep3('ferramentas')">
+          <div style="font-size:28px;margin-bottom:8px">🔧</div>
+          <div class="lock-action-label">FERRAMENTAS</div>
+        </div>
+        <div class="lock-action-card" style="border-top:3px solid #7aaddd" onclick="showLockStep3('insumos')">
+          <div style="font-size:28px;margin-bottom:8px">📦</div>
+          <div class="lock-action-label">INSUMOS</div>
+        </div>
+      </div>
+      <button onclick="showLockStep1()" class="lock-back-btn">← Voltar</button>
+    </div>
+
+    <!-- STEP 3A: Ações Ferramentas -->
+    <div id="lockStep3Ferramentas" style="display:none;flex-direction:column;align-items:center;gap:20px;width:100%">
+      <div style="font-size:12px;color:var(--muted);letter-spacing:.18em;margin-bottom:4px">🔧 FERRAMENTAS</div>
+      <div class="lock-actions" style="width:100%">
+        <div class="lock-action-card retirar" onclick="quickAction('retirar')">
+          <div style="font-size:28px;margin-bottom:8px">📤</div>
+          <div class="lock-action-label">RETIRAR</div>
+        </div>
+        <div class="lock-action-card devolver" onclick="quickAction('devolver')">
+          <div style="font-size:28px;margin-bottom:8px">📥</div>
+          <div class="lock-action-label">DEVOLVER</div>
+        </div>
+      </div>
+      <button onclick="showLockStep2()" class="lock-back-btn">← Voltar</button>
+      <button onclick="goLock()" style="background:none;border:1px solid var(--border2);color:var(--muted);font-size:12px;font-weight:600;letter-spacing:.1em;padding:8px 20px;border-radius:10px;cursor:pointer;font-family:'DM Sans';margin-top:8px">⬅ SAIR</button>
+    </div>
+
+    <!-- STEP 3B: Ações Insumos -->
+    <div id="lockStep3Insumos" style="display:none;flex-direction:column;align-items:center;gap:20px;width:100%">
+      <div style="font-size:12px;color:var(--muted);letter-spacing:.18em;margin-bottom:4px">📦 INSUMOS</div>
+      <div class="lock-actions" style="width:100%">
+        <div class="lock-action-card devolver" onclick="quickActionInsumo('entrada')">
+          <div style="font-size:28px;margin-bottom:8px">📥</div>
+          <div class="lock-action-label">ENTRADA</div>
+        </div>
+        <div class="lock-action-card retirar" onclick="quickActionInsumo('saida')">
+          <div style="font-size:28px;margin-bottom:8px">📤</div>
+          <div class="lock-action-label">SAÍDA</div>
+        </div>
+      </div>
+      <button onclick="showLockStep2()" class="lock-back-btn">← Voltar</button>
+      <button onclick="goLock()" style="background:none;border:1px solid var(--border2);color:var(--muted);font-size:12px;font-weight:600;letter-spacing:.1em;padding:8px 20px;border-radius:10px;cursor:pointer;font-family:'DM Sans';margin-top:8px">⬅ SAIR</button>
+    </div>
+
+  </div>
+</div>
+<!-- APP -->
+<div id="app">
+  <header>
+    <div class="header-logo"><svg viewBox="0 0 1600 900" xmlns="http://www.w3.org/2000/svg"><g fill="white"><rect x="50" y="305" width="285" height="85" rx="12"/><rect x="75" y="330" width="235" height="35" fill="#1c1c1e"/><rect x="50" y="450" width="285" height="85" rx="12"/><rect x="75" y="475" width="235" height="35" fill="#1c1c1e"/><rect x="50" y="595" width="285" height="85" rx="12"/><rect x="75" y="620" width="235" height="35" fill="#1c1c1e"/></g><text x="420" y="470" font-family="Tenor Sans,serif" font-size="170" font-weight="300" letter-spacing="28" fill="white">SINAL SP</text><text x="420" y="590" font-family="Tenor Sans,serif" font-size="52" font-weight="300" letter-spacing="18" fill="white">MARCENARIA CORPORATIVA</text><text x="420" y="675" font-family="Tenor Sans,serif" font-size="52" font-weight="300" letter-spacing="18" fill="white">E RESIDENCIAL</text></svg></div>
+    <div style="flex:1"></div>
+    <div id="syncDot" class="sync-dot" title="Conectado ao Firebase"></div>
+    <div class="clock-wrap" style="margin-left:10px">
+      <div class="clock-time" id="clockTime"></div>
+      <div class="clock-date" id="clockDate"></div>
+    </div>
+    <button onclick="goLock()" style="background:none;border:1px solid var(--border2);color:var(--muted);font-size:12px;font-weight:600;letter-spacing:.1em;padding:8px 14px;border-radius:10px;cursor:pointer;font-family:'DM Sans';display:flex;align-items:center;gap:6px;transition:all .2s;margin-right:8px" onmouseover="this.style.borderColor='var(--accent2)';this.style.color='var(--text)'" onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--muted)'">⬅ SAIR</button>
+    <button class="btn-admin" onclick="openAdminPin()" title="Admin">⚙</button>
+  </header>
+
+  <div class="tabs">
+    <div class="tab active" id="tabFerramentas" onclick="showTab('ferramentas')">🔧 FERRAMENTAS</div>
+    <div class="tab" id="tabInsumos" style="display:none" onclick="showTab('insumos')">📦 INSUMOS</div>
+  </div>
+
+  <!-- FERRAMENTAS -->
+  <div class="page active" id="page-ferramentas">
+    <div class="sec-title">Selecione uma ferramenta</div>
+    <div class="search-bar">
+      <input type="text" id="searchInput" placeholder="🔍 Buscar..." oninput="renderTools()">
+      <select id="filterCat" onchange="renderTools()"><option value="">Todas as categorias</option></select>
+    </div>
+    <div class="chips" id="statusChips">
+      <div class="chip active" data-filter="all" onclick="setFilter(this)">Todas</div>
+      <div class="chip" data-filter="ok" onclick="setFilter(this)">✅ Disponíveis</div>
+      <div class="chip" data-filter="out" onclick="setFilter(this)">🔴 Em uso</div>
+    </div>
+    <div class="grid" id="toolsGrid"></div>
+    <div style="padding:20px 0 40px;display:flex;justify-content:center">
+      <button onclick="goLock()" style="background:none;border:1px solid var(--border2);color:var(--muted);font-size:12px;font-weight:600;letter-spacing:.1em;padding:10px 32px;border-radius:10px;cursor:pointer;font-family:'DM Sans'">⬅ SAIR</button>
+    </div>
+  </div>
+
+  <!-- INSUMOS -->
+  <div class="page" id="page-insumos">
+    <div class="sec-title">Estoque de insumos</div>
+    <div class="search-bar">
+      <input type="text" id="searchInsumo" placeholder="🔍 Buscar insumo..." oninput="renderInsumos()">
+      <select id="filterICat" onchange="renderInsumos()"><option value="">Todas as categorias</option></select>
+    </div>
+    <div class="chips" id="insumoChips">
+      <div class="chip active" data-ifilter="all" onclick="setIFilter(this)">Todos</div>
+      <div class="chip" data-ifilter="low" onclick="setIFilter(this)">⚠️ Estoque baixo</div>
+      <div class="chip" data-ifilter="ok" onclick="setIFilter(this)">✅ OK</div>
+    </div>
+    <div class="grid" id="insumosGrid"></div>
+    <div style="padding:20px 0 40px;display:flex;justify-content:center">
+      <button onclick="goLock()" style="background:none;border:1px solid var(--border2);color:var(--muted);font-size:12px;font-weight:600;letter-spacing:.1em;padding:10px 32px;border-radius:10px;cursor:pointer;font-family:'DM Sans'">⬅ SAIR</button>
+    </div>
+  </div>
+
+  <!-- ADMIN -->
+  <div class="page" id="page-admin">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <div class="sec-title" style="margin-bottom:0">⚙️ PAINEL ADMINISTRATIVO</div>
+      <button onclick="goLock()" style="background:none;border:1px solid var(--border2);color:var(--muted);font-size:12px;font-weight:600;letter-spacing:.1em;padding:8px 18px;border-radius:10px;cursor:pointer;font-family:'DM Sans';display:flex;align-items:center;gap:8px;transition:all .2s" onmouseover="this.style.borderColor='var(--accent2)';this.style.color='var(--text)'" onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--muted)'">⬅ SAIR</button>
+    </div>
+    <div class="admin-grid" id="statsGrid"></div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="font-size:15px;font-weight:600;color:var(--text)">Ferramentas</div>
+      <button class="btn-sm" style="border-color:var(--accent2);color:var(--text)" onclick="openAddTool()">+ Nova</button>
+    </div>
+    <div class="tool-list-admin" id="adminToolList"></div>
+    <div class="divider"></div>
+
+    <!-- Categorias -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="font-size:15px;font-weight:600;color:var(--text)">CATEGORIAS</div>
+      <button class="btn-sm" style="border-color:var(--accent2);color:var(--text)" onclick="openAddCat()">+ NOVA</button>
+    </div>
+    <div id="adminCatList" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px"></div>
+    <div class="divider"></div>
+
+    <!-- Funcionários -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="font-size:15px;font-weight:600;color:var(--text)">FUNCIONÁRIOS</div>
+      <button class="btn-sm" style="border-color:var(--accent2);color:var(--text)" onclick="openAddEmp()">+ Novo</button>
+    </div>
+    <div class="emp-list" id="adminEmpList"></div>
+    <div class="divider"></div>
+
+    <!-- Histórico -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="font-size:15px;font-weight:600;color:var(--text)">HISTÓRICO DE MOVIMENTAÇÕES</div>
+      <div style="display:flex;gap:8px">
+        <div class="chip active" data-hf="all" onclick="setHFilter(this)">TODOS</div>
+        <div class="chip" data-hf="retirada" onclick="setHFilter(this)">RETIRADAS</div>
+        <div class="chip" data-hf="devolucao" onclick="setHFilter(this)">DEVOLUÇÕES</div>
+      </div>
+    </div>
+    <div class="history-list" id="historyList" style="margin-bottom:24px"></div>
+    <div class="divider"></div>
+
+
+    <!-- Insumos Admin -->
+    <div class="divider"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="font-size:15px;font-weight:600;color:var(--text)">📦 INSUMOS</div>
+      <button class="btn-sm" style="border-color:var(--accent2);color:var(--text)" onclick="openAddInsumo()">+ Novo</button>
+    </div>
+    <div style="margin-bottom:12px;display:flex;align-items:center;gap:10px">
+      <div style="font-size:13px;font-weight:600;color:var(--text)">CATEGORIAS DE INSUMOS</div>
+      <button class="btn-sm" style="border-color:var(--accent2);color:var(--text)" onclick="openAddICat()">+ NOVA</button>
+    </div>
+    <div id="adminICatList" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px"></div>
+    <div class="tool-list-admin" id="adminInsumoList"></div>
+    <div class="divider"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="font-size:15px;font-weight:600;color:var(--text)">HISTÓRICO DE INSUMOS</div>
+      <div style="display:flex;gap:8px">
+        <div class="chip active" data-ihf="all" onclick="setIHFilter(this)">TODOS</div>
+        <div class="chip" data-ihf="entrada" onclick="setIHFilter(this)">ENTRADAS</div>
+        <div class="chip" data-ihf="saida" onclick="setIHFilter(this)">SAÍDAS</div>
+      </div>
+    </div>
+    <div class="history-list" id="ihistoryList" style="margin-bottom:24px"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-ghost" style="flex:1;min-width:140px" onclick="exportCSV()">📥 EXPORTAR CSV</button>
+      <button class="btn btn-ghost" style="flex:1;min-width:140px;color:var(--red);border-color:var(--red)" onclick="clearHistory()">🗑 LIMPAR HISTÓRICO</button>
+    </div>
+    <div class="divider"></div>
+
+    <!-- Alertas -->
+    <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:6px">⚠️ ALERTAS DE DANO</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6">
+      Quando uma ferramenta for devolvida como <span style="color:#f0a500;font-weight:600">DANIFICADA</span>, uma mensagem é enviada <b style="color:var(--text)">automaticamente</b> via WhatsApp.
+    </div>
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px;display:flex;align-items:center;gap:10px">
+      <span style="font-size:18px">📱</span>
+      <div>
+        <div style="font-size:13px;color:var(--text);font-weight:500">+55 (11) 97500-4037</div>
+        <div style="font-size:11px;color:var(--muted)">via CallMeBot</div>
+      </div>
+      <span style="margin-left:auto;background:rgba(52,199,89,.12);color:var(--green);font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px">● ATIVO</span>
+    </div>
+    <button class="btn btn-ghost" style="border-color:#25D366;color:#25D366" onclick="testAlertWhatsapp()">📱 ENVIAR MENSAGEM DE TESTE</button>
+    <button id="btnInstallApp" class="btn btn-ghost" style="display:none;border-color:var(--accent2);color:var(--text);margin-top:10px" onclick="installApp()">📲 INSTALAR APP NO DISPOSITIVO</button>
+    <button class="btn btn-ghost" style="margin-top:10px;border-color:#7aaddd;color:#7aaddd" onclick="requestNotificationPermission().then(ok => showToast(ok ? '🔔 Notificações ativadas!' : '❌ Permissão negada'))">🔔 ATIVAR NOTIFICAÇÕES</button>
+  </div>
+
+
+</div>
+
+<!-- MODAL: INSUMO MOVIMENTAÇÃO -->
+<div class="overlay" id="insumoActionOverlay">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="insumoModalTitle">Registrar Entrada</div>
+    <div class="modal-tool-name" id="insumoModalName"></div>
+    <div id="insumoSaldoInfo" style="background:var(--bg2);border-radius:10px;padding:12px 14px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
+      <div>
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">SALDO ATUAL</div>
+        <div id="insumoSaldoAtual" style="font-size:28px;font-weight:300;color:var(--text)">0</div>
+      </div>
+      <div id="insumoUnitLabel" style="font-size:16px;color:var(--muted)">UN</div>
+    </div>
+    <div class="form-group">
+      <label id="insumoQtdLabel">Quantidade de entrada</label>
+      <input type="number" id="inputInsumoQtd" min="0.001" step="0.001" placeholder="0" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:12px 14px;border-radius:10px;font-family:'DM Sans';font-size:20px;outline:none;width:100%;transition:border-color .2s">
+    </div>
+    <div class="form-group">
+      <label>Responsável</label>
+      <div class="emp-grid" id="empGridInsumo"></div>
+      <div class="emp-name-input-wrap"><input type="text" id="inputInsumoNome" placeholder="Ou digite o nome..." autocomplete="off" oninput="clearIEmpSelection()"></div>
+    </div>
+    <div class="form-group">
+      <label>Observação (opcional)</label>
+      <textarea id="inputInsumoObs" rows="2" placeholder="Ex: NF 1234, fornecedor XYZ"></textarea>
+    </div>
+    <button class="btn btn-primary" id="btnConfirmarInsumo" onclick="confirmarMovInsumo()">✅ Confirmar</button>
+    <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">Cancelar</button>
+  </div>
+</div>
+
+<!-- MODAL: NOVO INSUMO -->
+<div class="overlay" id="addInsumoOverlay">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="addInsumoTitle">Novo Insumo</div>
+    <div class="form-group"><label>Nome do insumo</label><input type="text" id="newInsumoName" placeholder="Ex: Cola PVA, Parafuso 3/8, Tinta Branca"></div>
+    <div class="form-group">
+      <label>Categoria</label>
+      <div id="icatChipsAdmin" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px"></div>
+      <input type="text" id="newInsumoCat" placeholder="Ou digite uma nova categoria...">
+    </div>
+    <div class="form-group">
+      <label>Unidade de medida</label>
+      <div class="radio-group" style="flex-wrap:wrap">
+        <div class="radio-btn selected" data-unit="UN" onclick="selectUnit(this)">UN</div>
+        <div class="radio-btn" data-unit="KG" onclick="selectUnit(this)">KG</div>
+        <div class="radio-btn" data-unit="L" onclick="selectUnit(this)">L</div>
+        <div class="radio-btn" data-unit="m" onclick="selectUnit(this)">m</div>
+        <div class="radio-btn" data-unit="m²" onclick="selectUnit(this)">m²</div>
+        <div class="radio-btn" data-unit="cx" onclick="selectUnit(this)">cx</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Estoque mínimo (alerta)</label>
+      <input type="number" id="newInsumoMin" min="0" step="0.01" placeholder="Ex: 5" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:12px 14px;border-radius:10px;font-family:'DM Sans';font-size:15px;outline:none;width:100%">
+    </div>
+    <div class="form-group"><label>Saldo inicial</label><input type="number" id="newInsumoSaldo" min="0" step="0.001" placeholder="0" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:12px 14px;border-radius:10px;font-family:'DM Sans';font-size:15px;outline:none;width:100%"></div>
+    <div class="form-group"><label>Observações</label><textarea id="newInsumoObs" rows="2" placeholder="Ex: marca preferida, fornecedor..."></textarea></div>
+    <button class="btn btn-primary" onclick="saveInsumo()">Salvar Insumo</button>
+    <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">Cancelar</button>
+  </div>
+</div>
+
+<!-- MODAL: NOVA CATEGORIA INSUMO -->
+<div class="overlay" id="addICatOverlay">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">NOVA CATEGORIA DE INSUMO</div>
+    <div class="form-group"><label>NOME</label><input type="text" id="newICatName" placeholder="EX: COLA, FIXAÇÃO, TINTAS..."></div>
+    <button class="btn btn-primary" onclick="saveICat()">SALVAR</button>
+    <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">CANCELAR</button>
+  </div>
+</div>
+
+<!-- MODAL: RETIRADA / DEVOLUÇÃO -->
+<div class="overlay" id="actionOverlay">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="actionModalTitle">Registrar Retirada</div>
+    <div class="modal-tool-name" id="actionToolName"></div>
+    <div class="modal-info" id="actionToolInfo"></div>
+    <div id="formRetirada">
+      <div class="form-group">
+        <label>Quem está retirando?</label>
+        <div class="emp-grid" id="empGridRetirada"></div>
+        <div class="emp-name-input-wrap"><input type="text" id="inputNome" placeholder="Ou digite o nome..." autocomplete="off" oninput="clearEmpSelection()"></div>
+      </div>
+      <div class="form-group">
+        <label>Destino</label>
+        <div class="radio-group">
+          <div class="radio-btn selected" data-dest="Obra" onclick="selectDest(this)">🏗 Obra</div>
+          <div class="radio-btn" data-dest="Empresa" onclick="selectDest(this)">🏭 Uso interno</div>
+        </div>
+      </div>
+      <div class="form-group" id="grpObra">
+        <label>Nome / endereço da obra</label>
+        <input type="text" id="inputObra" placeholder="Ex: Ap. Sr. Carlos – Rua das Flores" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>Observação (opcional)</label>
+        <textarea id="inputObs" rows="2" placeholder="Ex: levar junto com a furadeira"></textarea>
+      </div>
+      <button class="btn btn-danger" onclick="confirmarRetirada()">🔴 Confirmar Retirada</button>
+      <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">Cancelar</button>
+    </div>
+    <div id="formDevolucao" style="display:none">
+      <div id="devInfo" style="background:var(--bg2);border-radius:10px;padding:14px;margin-bottom:16px;font-size:13px;color:var(--muted);line-height:1.9"></div>
+      <div class="form-group">
+        <label>Estado ao devolver</label>
+        <div class="radio-group">
+          <div class="radio-btn selected" data-state="Perfeito" onclick="selectState(this)">PERFEITO</div>
+          <div class="radio-btn" data-state="Danificado" onclick="selectState(this)">⚠️ DANIFICADO</div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Observação (opcional)</label>
+        <textarea id="inputObsDev" rows="2" placeholder="Ex: precisa de afiação"></textarea>
+      </div>
+      <button class="btn btn-success" onclick="confirmarDevolucao()">✅ Confirmar Devolução</button>
+      <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: PIN -->
+<div class="overlay" id="pinOverlay">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Acesso Administrativo</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:22px">Digite o PIN para continuar</div>
+    <div class="pin-display" id="pinDisplay">_ _ _ _</div>
+    <div class="pin-pad">
+      <div class="pin-key" onclick="pinKey('1')">1</div><div class="pin-key" onclick="pinKey('2')">2</div><div class="pin-key" onclick="pinKey('3')">3</div>
+      <div class="pin-key" onclick="pinKey('4')">4</div><div class="pin-key" onclick="pinKey('5')">5</div><div class="pin-key" onclick="pinKey('6')">6</div>
+      <div class="pin-key" onclick="pinKey('7')">7</div><div class="pin-key" onclick="pinKey('8')">8</div><div class="pin-key" onclick="pinKey('9')">9</div>
+      <div class="pin-key" onclick="pinKey('DEL')" style="font-size:18px">⌫</div>
+      <div class="pin-key" onclick="pinKey('0')">0</div>
+      <div class="pin-key" onclick="closeModal()" style="font-size:14px;font-family:'DM Sans'">✕</div>
+    </div>
+    <div id="pinError" style="color:var(--red);text-align:center;font-size:13px;margin-top:16px;display:none">PIN incorreto. Tente novamente.</div>
+  </div>
+</div>
+
+<!-- MODAL: NOVA FERRAMENTA -->
+<div class="overlay" id="addToolOverlay">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="addToolTitle">Nova Ferramenta</div>
+    <div class="form-group">
+      <label>Foto da ferramenta</label>
+      <div class="photo-upload-area" onclick="document.getElementById('photoInput').click()">
+        <div id="photoPlaceholder" style="color:var(--muted);font-size:14px">📷 Toque para tirar foto ou escolher da galeria</div>
+        <img id="photoPreview" class="photo-preview" alt="preview">
+      </div>
+      <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none" onchange="handlePhotoChange(this)">
+    </div>
+    <div class="form-group"><label>Nome da ferramenta</label><input type="text" id="newToolName" placeholder="Ex: Serra Circular Makita"></div>
+    <div class="form-group">
+      <label>Categoria</label>
+      <div class="cat-chips" id="catChipsAdmin" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px"></div>
+      <input type="text" id="newToolCat" placeholder="Ou digite uma nova categoria...">
+    </div>
+    <div class="form-group"><label>Número de série / patrimônio (opcional)</label><input type="text" id="newToolSerial" placeholder="Ex: DEW-2024-001"></div>
+    <div class="form-group"><label>Observações</label><textarea id="newToolObs" rows="2" placeholder="Ex: Makita 185mm, disco novo"></textarea></div>
+    <button class="btn btn-primary" onclick="saveTool()">Salvar Ferramenta</button>
+    <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">Cancelar</button>
+  </div>
+</div>
+
+<!-- MODAL: NOVA CATEGORIA -->
+<div class="overlay" id="addCatOverlay">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">NOVA CATEGORIA</div>
+    <div class="form-group"><label>NOME DA CATEGORIA</label><input type="text" id="newCatName" placeholder="EX: ELÉTRICAS, MANUAIS..."></div>
+    <button class="btn btn-primary" onclick="saveCat()">SALVAR CATEGORIA</button>
+    <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">CANCELAR</button>
+  </div>
+</div>
+
+<!-- MODAL: NOVO FUNCIONÁRIO -->
+<div class="overlay" id="addEmpOverlay">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="addEmpTitle">Novo Funcionário</div>
+    <div class="form-group"><label>Nome completo</label><input type="text" id="newEmpName" placeholder="Ex: João Silva"></div>
+    <div class="form-group"><label>Ícone (emoji ou letra)</label><input type="text" id="newEmpIcon" placeholder="👷" maxlength="4"></div>
+    <button class="btn btn-primary" onclick="saveEmp()">Salvar Funcionário</button>
+    <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">Cancelar</button>
+  </div>
+</div>
+
+<!-- MODAL: CONFIRMAÇÃO -->
+<div class="overlay" id="confirmOverlay">
+  <div class="modal" style="max-width:380px;text-align:center">
+    <div class="modal-handle"></div>
+    <div style="font-size:32px;margin-bottom:12px" id="confirmIcon">🗑</div>
+    <div class="modal-title" id="confirmTitle" style="justify-content:center;display:block">Confirmar</div>
+    <div style="font-size:14px;color:var(--muted);margin-bottom:28px" id="confirmMsg">Tem certeza?</div>
+    <button class="btn btn-danger" id="confirmOkBtn">Confirmar</button>
+    <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">Cancelar</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── CONFIG ────────────────────────────────────────────────────────
+const ADMIN_PIN = '1234'; // Altere aqui
+
+// ── CALLMEBOT ─────────────────────────────────────────────────────
+const CALLMEBOT_PHONE  = '5511975004037';
+const CALLMEBOT_APIKEY = '8992952';
+
+// ── STATE ─────────────────────────────────────────────────────────
+let currentFilter   = 'all';
+let currentHFilter  = 'all';
+let currentToolId   = null;
+let pinBuffer       = '';
+let editingToolId   = null;
+let editingEmpId    = null;
+let currentDest     = 'Obra';
+let currentState    = 'Perfeito';
+let selectedEmpName = '';
+let pendingAction   = null;
+let currentPhotoData = null;
+
+// ── DEFAULT CATS ──────────────────────────────────────────────────
+const DEFAULT_CATS = ['⚡ Elétricas','🔨 Manuais','📏 Medição','🔩 Fixação','🪚 Corte','🎨 Pintura','🧰 Segurança','🪜 Acesso'];
+
+function getCats() {
+  const saved = window._cats || [];
+  if (saved.length > 0) return saved;
+  return DEFAULT_CATS;
+}
+
+// ── INIT (chamado após Firebase pronto) ───────────────────────────
+function initApp() {
+  document.getElementById('lockScreen').style.display = 'flex';
+  updateClock();
+  setInterval(updateClock, 1000);
+  // Inicializa categorias se vazio
+  if ((window._cats || []).length === 0) DB.saveCats(DEFAULT_CATS);
+  if ((window._icats || []).length === 0) DB.saveICats(DEFAULT_ICATS);
+}
+
+// ── CLOCK ─────────────────────────────────────────────────────────
+function updateClock() {
+  const now  = new Date();
+  const time = now.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  const date = now.toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit',month:'2-digit'});
+  const ct = document.getElementById('clockTime');
+  const cd = document.getElementById('clockDate');
+  if(ct) ct.textContent = time;
+  if(cd) cd.textContent = date;
+}
+
+// ── LOCK ──────────────────────────────────────────────────────────
+function _hideAllSteps() {
+  ['lockStep1','lockStep2','lockStep3Ferramentas','lockStep3Insumos'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.style.display='none';
+  });
+}
+function showLockStep1() { _hideAllSteps(); document.getElementById('lockStep1').style.display='flex'; }
+function showLockStep2() { _hideAllSteps(); document.getElementById('lockStep2').style.display='flex'; }
+function showLockStep3(modulo) {
+  _hideAllSteps();
+  const id = modulo==='ferramentas' ? 'lockStep3Ferramentas' : 'lockStep3Insumos';
+  document.getElementById(id).style.display='flex';
+}
+
+function unlockApp(action, modulo) {
+  document.getElementById('lockScreen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  const tab = modulo || 'ferramentas';
+  showTab(tab);
+  resetLockTimer();
+  if (action) setTimeout(() => triggerActionByMode(action), 100);
+}
+
+function quickAction(action) { pendingAction = action; unlockApp(action, 'ferramentas'); }
+
+function triggerActionByMode(action) {
+  if (action === 'devolver') { setFilterDirect('out'); showToast('🔴 Selecione a ferramenta a devolver'); }
+  else { setFilterDirect('ok'); showToast('📦 Selecione a ferramenta a retirar'); }
+}
+
+function setFilterDirect(f) {
+  currentFilter = f;
+  document.querySelectorAll('#statusChips .chip').forEach(c => c.classList.toggle('active', c.dataset.filter === f));
+  renderTools();
+}
+
+let lockTimer;
+function resetLockTimer() { clearTimeout(lockTimer); lockTimer = setTimeout(goLock, 5*60*1000); }
+function goLock() {
+  document.getElementById('lockScreen').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+  closeModal(); pendingAction = null; currentFilter = 'all'; currentInsumoAction = null;
+  showLockStep1();
+}
+document.addEventListener('touchstart', resetLockTimer);
+document.addEventListener('click', resetLockTimer);
+
+// ── TABS ──────────────────────────────────────────────────────────
+function showTab(tab) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-'+tab).classList.add('active');
+  // Tabs bar: show only for ferramentas/insumos, hide for admin
+  const tabsBar = document.querySelector('.tabs');
+  if (tab === 'admin') {
+    if (tabsBar) tabsBar.style.display = 'none';
+  } else {
+    if (tabsBar) tabsBar.style.display = 'flex';
+    // Only show the active module tab
+    const tF = document.getElementById('tabFerramentas');
+    const tI = document.getElementById('tabInsumos');
+    if (tF) { tF.style.display = tab==='ferramentas' ? 'block' : 'none'; tF.classList.toggle('active', tab==='ferramentas'); }
+    if (tI) { tI.style.display = tab==='insumos' ? 'block' : 'none'; tI.classList.toggle('active', tab==='insumos'); }
+  }
+  if(tab==='admin') { renderAdmin(); renderHistory(); renderAdminInsumos(); renderIHistory(); }
+  if(tab==='ferramentas') renderTools();
+  if(tab==='insumos') renderInsumos();
+}
+
+// ── TOOL CARD ─────────────────────────────────────────────────────
+function toolCardHTML(t) {
+  const imgHTML   = t.photo ? `<img src="${t.photo}" alt="${t.name}">` : `<span class="tool-emoji">🔧</span>`;
+  const isDamaged = t.damaged === true;
+  const isOut     = t.status === 'out';
+  const mode      = pendingAction;
+  let statusBadge = '', extraInfo = '', cardClass = 'tool-card', clickHandler = '';
+
+  if (isDamaged) {
+    cardClass += ' damaged';
+    statusBadge = `<span class="status-badge badge-damaged">⚠️ DANIFICADO</span>`;
+    extraInfo   = `<div class="tool-damaged-msg">ITEM DANIFICADO — RETIRADA BLOQUEADA</div>`;
+    clickHandler = `onclick="showDamagedWarning('${t.name}')"`;
+  } else if (isOut) {
+    cardClass += ' out';
+    statusBadge = `<span class="status-badge badge-out">● EM USO</span>`;
+    if (mode === 'devolver') {
+      extraInfo    = `<div class="tool-who">Por: ${t.outBy}</div>`;
+      clickHandler = `onclick="openAction('${t.id}')"`;
+    } else {
+      extraInfo    = `<div class="tool-who">Por: ${t.outBy}</div><div class="tool-damaged-msg" style="color:var(--muted)">EM USO — NÃO DISPONÍVEL</div>`;
+      clickHandler = `onclick="showInUseInfo('${t.name}','${t.outBy}','${t.outTo||''}')"`;
+    }
+  } else {
+    statusBadge = `<span class="status-badge badge-ok">● DISPONÍVEL</span>`;
+    if (mode === 'devolver') {
+      cardClass   += ' muted-card';
+      extraInfo    = `<div class="tool-damaged-msg" style="color:var(--muted)">NÃO ESTÁ EM USO</div>`;
+      clickHandler = `onclick="showToast('ESTE ITEM NÃO ESTÁ EM USO')"`;
+    } else {
+      clickHandler = `onclick="openAction('${t.id}')"`;
+    }
+  }
+  return `<div class="${cardClass}" ${clickHandler}><div class="tool-img-wrap">${imgHTML}</div><div class="tool-name">${t.name}</div><div class="tool-category">${t.category}</div><div>${statusBadge}</div>${extraInfo}</div>`;
+}
+
+// ── RENDER TOOLS ──────────────────────────────────────────────────
+function renderTools() {
+  const tools  = DB.tools();
+  const search = (document.getElementById('searchInput')||{value:''}).value.toLowerCase();
+  const cat    = (document.getElementById('filterCat')||{value:''}).value;
+  const sel    = document.getElementById('filterCat');
+  if(sel) {
+    const prev = sel.value;
+    const allCats = getCats();
+    sel.innerHTML = '<option value="">TODAS AS CATEGORIAS</option>';
+    allCats.forEach(c => { const o=document.createElement('option'); o.value=c; o.textContent=c; if(c===prev) o.selected=true; sel.appendChild(o); });
+  }
+  const filtered = tools.filter(t => {
+    const ms  = t.name.toLowerCase().includes(search);
+    const mc  = !cat || t.category === cat;
+    const mst = currentFilter==='all' || (currentFilter==='ok'?t.status==='ok':t.status==='out');
+    return ms && mc && mst;
+  });
+  const grid = document.getElementById('toolsGrid');
+  if(!grid) return;
+  grid.innerHTML = filtered.length===0
+    ? '<div class="empty" style="grid-column:1/-1"><div class="e-icon">🔍</div><p>Nenhuma ferramenta encontrada</p></div>'
+    : filtered.map(toolCardHTML).join('');
+}
+
+function setFilter(el) {
+  document.querySelectorAll('#statusChips .chip').forEach(c=>c.classList.remove('active'));
+  el.classList.add('active');
+  currentFilter = el.dataset.filter;
+  renderTools();
+}
+
+// ── HISTORY ───────────────────────────────────────────────────────
+function renderHistory() {
+  const history  = DB.history();
+  const filtered = [...history].reverse().filter(h => currentHFilter==='all' || h.type===currentHFilter);
+  const list     = document.getElementById('historyList');
+  if(!list) return;
+  list.innerHTML = filtered.length===0
+    ? '<div class="empty"><div class="e-icon">📋</div><p>Nenhuma movimentação ainda</p></div>'
+    : filtered.map(h => `
+      <div class="hist-item">
+        <div class="hist-dot ${h.type}"></div>
+        <div class="hist-body">
+          <div class="hist-title">${h.toolName}</div>
+          <div class="hist-meta">${h.type==='retirada'?`<b>${h.by}</b> retirou · ${fmt(h.at)}`:`<b>${h.by}</b> devolveu · ${fmt(h.at)} · ${h.state}`}</div>
+          ${h.type==='retirada'&&h.dest?`<span class="hist-tag ${h.dest==='Obra'?'tag-obra':'tag-empresa'}">${h.dest==='Obra'?'🏗 '+h.destName:'🏭 Uso interno'}</span>`:''}
+          ${h.obs?`<div style="font-size:11px;color:var(--muted);margin-top:3px">📝 ${h.obs}</div>`:''}
+        </div>
+      </div>`).join('');
+}
+
+function setHFilter(el) {
+  document.querySelectorAll('[data-hf]').forEach(c=>c.classList.remove('active'));
+  el.classList.add('active');
+  currentHFilter = el.dataset.hf;
+  renderHistory();
+}
+
+function fmt(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleDateString('pt-BR')+' '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+}
+
+// ── ACTION MODAL ──────────────────────────────────────────────────
+function openAction(id) {
+  const tool = DB.tools().find(t => String(t.id) === String(id));
+  if(!tool) return;
+  if(tool.status==='out' && pendingAction !== 'devolver') return;
+  if(tool.status==='ok'  && pendingAction !== 'retirar')  return;
+  currentToolId = id;
+  document.getElementById('actionToolName').textContent = tool.name;
+  document.getElementById('actionToolInfo').textContent = tool.category + (tool.serial?' · Nº '+tool.serial:'');
+  if(tool.status==='ok') {
+    document.getElementById('actionModalTitle').textContent = '🔴 Registrar Retirada';
+    document.getElementById('formRetirada').style.display  = 'block';
+    document.getElementById('formDevolucao').style.display = 'none';
+    currentDest = 'Obra'; selectedEmpName = '';
+    document.getElementById('inputNome').value = '';
+    document.getElementById('inputObra').value = '';
+    document.getElementById('inputObs').value  = '';
+    document.getElementById('grpObra').style.display = 'block';
+    document.querySelectorAll('[data-dest]').forEach(e=>e.classList.toggle('selected',e.dataset.dest==='Obra'));
+    renderEmpGrid();
+  } else {
+    document.getElementById('actionModalTitle').textContent = '✅ Registrar Devolução';
+    document.getElementById('formRetirada').style.display  = 'none';
+    document.getElementById('formDevolucao').style.display = 'block';
+    currentState = 'Perfeito';
+    document.getElementById('inputObsDev').value = '';
+    document.querySelectorAll('[data-state]').forEach(e=>e.classList.toggle('selected',e.dataset.state==='Perfeito'));
+    document.getElementById('devInfo').innerHTML = `<b>Retirado por:</b> ${tool.outBy}<br><b>Em:</b> ${fmt(tool.outAt)}<br>${tool.outTo?'<b>Destino:</b> '+tool.outTo:''}${tool.outObs?'<br><b>Obs:</b> '+tool.outObs:''}`;
+  }
+  document.getElementById('actionOverlay').classList.add('open');
+}
+
+function renderEmpGrid() {
+  const emps = DB.emps();
+  const grid = document.getElementById('empGridRetirada');
+  if(emps.length===0) { grid.innerHTML = ''; return; }
+  grid.innerHTML = emps.map(e=>`<div class="emp-btn" onclick="selectEmp(this,'${e.name}')"><span class="emp-icon">${e.icon||'👷'}</span>${e.name}</div>`).join('');
+}
+
+function selectEmp(el, name) {
+  document.querySelectorAll('.emp-btn').forEach(b=>b.classList.remove('selected'));
+  el.classList.add('selected'); selectedEmpName = name;
+  document.getElementById('inputNome').value = '';
+}
+function clearEmpSelection() { document.querySelectorAll('.emp-btn').forEach(b=>b.classList.remove('selected')); selectedEmpName = ''; }
+function selectDest(el) { document.querySelectorAll('[data-dest]').forEach(e=>e.classList.remove('selected')); el.classList.add('selected'); currentDest=el.dataset.dest; document.getElementById('grpObra').style.display=currentDest==='Obra'?'block':'none'; }
+function selectState(el) { document.querySelectorAll('[data-state]').forEach(e=>e.classList.remove('selected')); el.classList.add('selected'); currentState=el.dataset.state; }
+function getNome() { return selectedEmpName || document.getElementById('inputNome').value.trim(); }
+
+async function confirmarRetirada() {
+  const nome = getNome();
+  const obra = document.getElementById('inputObra').value.trim();
+  const obs  = document.getElementById('inputObs').value.trim();
+  if(!nome) { showToast('⚠️ Informe o nome'); return; }
+  if(currentDest==='Obra'&&!obra) { showToast('⚠️ Informe a obra'); return; }
+  const tool = DB.tools().find(t => String(t.id) === String(currentToolId));
+  const now  = new Date().toISOString();
+  const updated = { ...tool, status:'out', outBy:nome, outAt:now, outTo:currentDest==='Obra'?obra:'Uso interno', outObs:obs };
+  await DB.saveTool(updated);
+  await DB.addHistory({type:'retirada',toolId:String(tool.id),toolName:tool.name,by:nome,at:now,dest:currentDest,destName:obra,obs});
+  closeModal();
+  showToast('🔴 Retirada registrada!');
+}
+
+async function confirmarDevolucao() {
+  const obs       = document.getElementById('inputObsDev').value.trim();
+  const tool      = DB.tools().find(t => String(t.id) === String(currentToolId));
+  const now       = new Date().toISOString();
+  const by        = tool.outBy;
+  const isDamaged = (currentState === 'Danificado');
+  const updated   = { ...tool, status:'ok', damaged:isDamaged, outBy:null, outAt:null, outTo:null, outObs:null };
+  await DB.saveTool(updated);
+  await DB.addHistory({type:'devolucao',toolId:String(tool.id),toolName:tool.name,by,at:now,state:currentState,obs});
+  closeModal();
+  showToast(isDamaged ? '⚠️ Devolvido como DANIFICADO!' : '✅ Devolução registrada!');
+  if (isDamaged) setTimeout(() => sendDamageAlert(tool.name, by, obs, fmt(now)), 600);
+}
+
+// ── ADMIN ─────────────────────────────────────────────────────────
+function renderAdmin() {
+  const tools   = DB.tools();
+  const history = DB.history();
+  const emps    = DB.emps();
+  const out     = tools.filter(t=>t.status==='out').length;
+  document.getElementById('statsGrid').innerHTML = `
+    <div class="stat-card"><div class="stat-num">${tools.length}</div><div class="stat-label">Ferramentas</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--green)">${tools.length-out}</div><div class="stat-label">Disponíveis</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--red)">${out}</div><div class="stat-label">Em uso</div></div>
+    <div class="stat-card"><div class="stat-num">${history.length}</div><div class="stat-label">Movimentações</div></div>`;
+  document.getElementById('adminToolList').innerHTML = tools.length===0
+    ? '<div class="empty"><div class="e-icon">🔧</div><p>Nenhuma ferramenta</p></div>'
+    : tools.map(t=>`
+      <div class="tool-row-admin" style="${t.damaged?'border-color:#f0a500;':''}">
+        <div class="tool-row-thumb">${t.photo?`<img src="${t.photo}" alt="${t.name}">`:' 🔧'}</div>
+        <div class="tool-row-info">
+          <div class="n">${t.name}${t.status==='out'?'<span style="color:var(--red);font-size:11px"> ● EM USO</span>':''}${t.damaged?'<span style="color:#f0a500;font-size:11px"> ⚠️ DANIFICADO</span>':''}</div>
+          <div class="c">${t.category}${t.serial?' · '+t.serial:''}</div>
+        </div>
+        <div class="tool-row-actions" style="flex-wrap:wrap;gap:6px;justify-content:flex-end">
+          ${t.damaged?`<button class="btn-sm" style="border-color:var(--green);color:var(--green)" onclick="markRepaired('${t.id}')">✅ REPARADO</button>`:''}
+          <button class="btn-sm" onclick="editTool('${t.id}')">✏️</button>
+          <button class="btn-sm del" onclick="deleteTool('${t.id}')">🗑</button>
+        </div>
+      </div>`).join('');
+  renderAdminCats();
+  renderAdminInsumos();
+  document.getElementById('adminEmpList').innerHTML = emps.length===0
+    ? '<div class="empty" style="padding:20px"><div class="e-icon">👷</div><p>Nenhum funcionário</p></div>'
+    : emps.map(e=>`
+      <div class="emp-row">
+        <div class="emp-row-icon">${e.icon||'👷'}</div>
+        <div class="emp-row-name">${e.name}</div>
+        <div style="display:flex;gap:8px">
+          <button class="btn-sm" onclick="editEmp('${e.id}')">✏️</button>
+          <button class="btn-sm del" onclick="deleteEmp('${e.id}')">🗑</button>
+        </div>
+      </div>`).join('');
+}
+
+// ── CATS ──────────────────────────────────────────────────────────
+function renderAdminCats() {
+  const el  = document.getElementById('adminCatList');
+  if(!el) return;
+  const all = getCats();
+  el.innerHTML = all.length===0
+    ? '<div style="color:var(--muted);font-size:13px">NENHUMA CATEGORIA</div>'
+    : all.map(cat=>`<div style="display:inline-flex;align-items:center;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:6px 14px;font-size:12px;color:var(--text2);gap:8px;"><span>${cat}</span><span onclick="deleteCat('${cat}')" style="cursor:pointer;color:var(--red);font-size:14px;line-height:1">✕</span></div>`).join('');
+}
+
+function renderCatChips() {
+  const grid = document.getElementById('catChipsAdmin');
+  if(!grid) return;
+  grid.innerHTML = getCats().map(cat=>`<div class="chip" style="cursor:pointer;font-size:12px" onclick="selectCatChip('${cat}')">${cat}</div>`).join('');
+}
+
+function selectCatChip(cat) {
+  document.getElementById('newToolCat').value = cat;
+  document.querySelectorAll('#catChipsAdmin .chip').forEach(c=>c.classList.toggle('active',c.textContent===cat));
+}
+
+function openAddCat() { document.getElementById('newCatName').value=''; document.getElementById('addCatOverlay').classList.add('open'); }
+
+async function saveCat() {
+  const name = document.getElementById('newCatName').value.trim().toUpperCase();
+  if(!name) { showToast('⚠️ INFORME O NOME'); return; }
+  const all = getCats();
+  if(!all.includes(name)) { await DB.saveCats([...all, name]); }
+  closeModal(); showToast('✅ CATEGORIA SALVA');
+}
+
+async function deleteCat(cat) {
+  const inUse = DB.tools().filter(t=>t.category===cat);
+  if(inUse.length>0) {
+    showConfirm('⚠️','CATEGORIA EM USO','EXISTEM '+inUse.length+' FERRAMENTA(S) NESSA CATEGORIA.',()=>{});
+    setTimeout(()=>{const b=document.getElementById('confirmOkBtn');if(b){b.textContent='ENTENDI';b.className='btn btn-ghost';}},10);
+    return;
+  }
+  showConfirm('🗑','EXCLUIR CATEGORIA?','A CATEGORIA "'+cat+'" SERÁ REMOVIDA.',async()=>{
+    await DB.saveCats(getCats().filter(c=>c!==cat));
+    showToast('🗑 CATEGORIA REMOVIDA');
+  });
+}
+
+// ── TOOLS CRUD ────────────────────────────────────────────────────
+function openAddTool() {
+  editingToolId=null; currentPhotoData=null;
+  document.getElementById('addToolTitle').textContent='Nova Ferramenta';
+  ['newToolName','newToolCat','newToolSerial','newToolObs'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('photoPreview').style.display='none';
+  document.getElementById('photoPlaceholder').style.display='block';
+  document.getElementById('photoInput').value='';
+  document.getElementById('addToolOverlay').classList.add('open');
+  setTimeout(renderCatChips,50);
+}
+
+function editTool(id) {
+  const t = DB.tools().find(t=>String(t.id)===String(id));
+  if(!t) return;
+  editingToolId=id; currentPhotoData=t.photo;
+  document.getElementById('addToolTitle').textContent='Editar Ferramenta';
+  document.getElementById('newToolName').value=t.name;
+  document.getElementById('newToolCat').value=t.category;
+  document.getElementById('newToolSerial').value=t.serial||'';
+  document.getElementById('newToolObs').value=t.obs||'';
+  if(t.photo){document.getElementById('photoPreview').src=t.photo;document.getElementById('photoPreview').style.display='block';document.getElementById('photoPlaceholder').style.display='none';}
+  else{document.getElementById('photoPreview').style.display='none';document.getElementById('photoPlaceholder').style.display='block';}
+  document.getElementById('addToolOverlay').classList.add('open');
+  setTimeout(renderCatChips,50);
+}
+
+function handlePhotoChange(input) {
+  const file=input.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{currentPhotoData=e.target.result;document.getElementById('photoPreview').src=currentPhotoData;document.getElementById('photoPreview').style.display='block';document.getElementById('photoPlaceholder').style.display='none';};
+  reader.readAsDataURL(file);
+}
+
+async function saveTool() {
+  const name=document.getElementById('newToolName').value.trim();
+  const cat=document.getElementById('newToolCat').value.trim();
+  if(!name||!cat){showToast('⚠️ Preencha nome e categoria');return;}
+  const id = editingToolId || Date.now();
+  const existing = editingToolId ? DB.tools().find(t=>String(t.id)===String(editingToolId)) : null;
+  const tool = {
+    id: String(id),
+    name, category:cat,
+    photo: currentPhotoData || (existing?existing.photo:null),
+    serial: document.getElementById('newToolSerial').value.trim(),
+    obs: document.getElementById('newToolObs').value.trim(),
+    status: existing?existing.status:'ok',
+    outBy: existing?existing.outBy:null,
+    outAt: existing?existing.outAt:null,
+    outTo: existing?existing.outTo:null,
+    outObs: existing?existing.outObs:null,
+    damaged: existing?existing.damaged:false,
+  };
+  await DB.saveTool(tool);
+  closeModal(); showToast('✅ Ferramenta salva!');
+}
+
+function deleteTool(id) {
+  showConfirm('🔧','Excluir ferramenta?','Esta ação não pode ser desfeita.',async()=>{
+    await DB.deleteTool(String(id));
+    showToast('🗑 Ferramenta excluída');
+  });
+}
+
+async function markRepaired(id) {
+  showConfirm('✅','MARCAR COMO REPARADO?','O item será liberado para retirada novamente.',async()=>{
+    const t=DB.tools().find(t=>String(t.id)===String(id));
+    if(t){await DB.saveTool({...t,damaged:false});showToast('✅ ITEM LIBERADO PARA USO');}
+  });
+  setTimeout(()=>{const b=document.getElementById('confirmOkBtn');if(b){b.textContent='SIM, REPARADO';b.className='btn btn-success';}},10);
+}
+
+// ── EMPS CRUD ─────────────────────────────────────────────────────
+function openAddEmp(){editingEmpId=null;document.getElementById('addEmpTitle').textContent='Novo Funcionário';document.getElementById('newEmpName').value='';document.getElementById('newEmpIcon').value='👷';document.getElementById('addEmpOverlay').classList.add('open');}
+
+function editEmp(id){
+  const e=DB.emps().find(e=>String(e.id)===String(id));if(!e)return;
+  editingEmpId=id;document.getElementById('addEmpTitle').textContent='Editar Funcionário';
+  document.getElementById('newEmpName').value=e.name;document.getElementById('newEmpIcon').value=e.icon||'👷';
+  document.getElementById('addEmpOverlay').classList.add('open');
+}
+
+async function saveEmp(){
+  const name=document.getElementById('newEmpName').value.trim();
+  const icon=document.getElementById('newEmpIcon').value.trim()||'👷';
+  if(!name){showToast('⚠️ Informe o nome');return;}
+  const id=editingEmpId||Date.now();
+  await DB.saveEmp({id:String(id),name,icon});
+  closeModal();showToast('✅ Funcionário salvo!');
+}
+
+function deleteEmp(id){
+  showConfirm('👷','Remover funcionário?','Esta ação não pode ser desfeita.',async()=>{
+    await DB.deleteEmp(String(id));showToast('🗑 Funcionário removido');
+  });
+}
+
+// ── PIN ───────────────────────────────────────────────────────────
+function openAdminPin(){pinBuffer='';updatePinDisplay();document.getElementById('pinError').style.display='none';document.getElementById('pinOverlay').classList.add('open');}
+function pinKey(k){
+  if(k==='DEL'){pinBuffer=pinBuffer.slice(0,-1);}else if(pinBuffer.length<4){pinBuffer+=k;}
+  updatePinDisplay();
+  if(pinBuffer.length===4){
+    if(pinBuffer===ADMIN_PIN){closeModal();showTab('admin');}
+    else{document.getElementById('pinError').style.display='block';setTimeout(()=>{pinBuffer='';updatePinDisplay();document.getElementById('pinError').style.display='none';},1200);}
+  }
+}
+function updatePinDisplay(){document.getElementById('pinDisplay').textContent=pinBuffer.padEnd(4,'_').split('').join(' ');}
+
+// ── EXPORT ────────────────────────────────────────────────────────
+function exportCSV(){
+  const rows=[['Data','Tipo','Ferramenta','Responsável','Destino','Estado','Obs']];
+  DB.history().forEach(h=>rows.push([fmt(h.at),h.type,h.toolName,h.by,h.type==='retirada'?(h.dest==='Obra'?h.destName:'Uso interno'):'',h.type==='devolucao'?h.state:'',h.obs||'']));
+  const csv=rows.map(r=>r.map(c=>`"${c}"`).join(',')).join('\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));
+  a.download='almoxarifado_'+new Date().toISOString().slice(0,10)+'.csv';a.click();showToast('📥 CSV exportado!');
+}
+
+function clearHistory(){
+  showConfirm('📋','Limpar histórico?','Todo o registro de movimentações será apagado.',async()=>{
+    await DB.clearHistory();showToast('🗑 Histórico limpo');
+  });
+}
+
+// ── HELPERS ───────────────────────────────────────────────────────
+function showInUseInfo(name,by,dest){
+  showConfirm('🔴',name.toUpperCase(),'ITEM EM USO POR: '+by.toUpperCase()+(dest?' — '+dest.toUpperCase():''),()=>{});
+  setTimeout(()=>{const b=document.getElementById('confirmOkBtn');if(b){b.textContent='FECHAR';b.className='btn btn-ghost';}},10);
+}
+function showDamagedWarning(name){
+  showConfirm('⚠️',name+' — DANIFICADO','Este item está marcado como danificado e não pode ser retirado.',()=>{});
+  setTimeout(()=>{const b=document.getElementById('confirmOkBtn');if(b){b.textContent='ENTENDI';b.className='btn btn-ghost';}},10);
+}
+function showConfirm(icon,title,msg,onOk){
+  document.getElementById('confirmIcon').textContent=icon;
+  document.getElementById('confirmTitle').textContent=title;
+  document.getElementById('confirmMsg').textContent=msg;
+  document.getElementById('confirmOkBtn').onclick=()=>{closeModal();onOk();};
+  document.getElementById('confirmOverlay').classList.add('open');
+}
+function closeModal(){document.querySelectorAll('.overlay').forEach(o=>o.classList.remove('open'));}
+function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);}
+document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)closeModal();}));
+
+// ── CALLMEBOT ALERT ───────────────────────────────────────────────
+function buildDamageMsg(toolName,by,obs,at){
+  let txt='SINAL SP - FERRAMENTA DANIFICADA\n\n';
+  txt+='Ferramenta: '+toolName+'\n';
+  txt+='Devolvido por: '+by+'\n';
+  txt+='Data/hora: '+at+'\n';
+  if(obs) txt+='Observacao: '+obs+'\n';
+  txt+='\nItem bloqueado. Verificar e registrar reparo.';
+  return txt;
+}
+
+function callMeBot(txt, cb) {
+  const url = 'https://api.callmebot.com/whatsapp.php?phone='+CALLMEBOT_PHONE+'&text='+encodeURIComponent(txt)+'&apikey='+CALLMEBOT_APIKEY;
+  const img  = new Image();
+  img.onload  = ()=>{ if(cb) cb(true); };
+  img.onerror = ()=>{ if(cb) cb(false); };
+  img.src = url;
+}
+
+function sendDamageAlert(toolName,by,obs,at){
+  callMeBot(buildDamageMsg(toolName,by,obs,at), ()=>{ showToast('📱 Alerta enviado no WhatsApp!'); });
+}
+
+function testAlertWhatsapp(){
+  showToast('📤 Enviando teste...');
+  callMeBot(buildDamageMsg('Furadeira de Impacto (TESTE)','Joao Silva','Teste de alerta',fmt(new Date().toISOString())),()=>{
+    showToast('📱 Teste enviado! Verifique o WhatsApp.');
+  });
+}
+
+
+// ── INSUMOS STATE ─────────────────────────────────────────────────
+let currentIFilter  = 'all';
+let currentIHFilter = 'all';
+let currentInsumoId = null;
+let currentInsumoAction = null; // 'entrada' | 'saida'
+let currentUnit     = 'UN';
+let editingInsumoId = null;
+let selectedIEmpName = '';
+
+const DEFAULT_ICATS = ['🧴 Colas e Adesivos','🔩 Fixação','🎨 Tintas e Vernizes','🪵 Madeira','🧱 Acabamentos','🧹 Limpeza','⚙️ Geral'];
+
+function getICats() {
+  const saved = window._icats || [];
+  return saved.length > 0 ? saved : DEFAULT_ICATS;
+}
+
+// ── LOCK INSUMOS ──────────────────────────────────────────────────
+
+function quickActionInsumo(action) {
+  currentInsumoAction = action;
+  unlockApp(null, 'insumos');
+  setTimeout(() => {
+    if (action === 'entrada') showToast('📥 Selecione o insumo para dar entrada');
+    else showToast('📤 Selecione o insumo para registrar saída');
+  }, 100);
+}
+
+// ── RENDER INSUMOS ────────────────────────────────────────────────
+function renderInsumos() {
+  const insumos = DB.insumos();
+  const search  = (document.getElementById('searchInsumo')||{value:''}).value.toLowerCase();
+  const cat     = (document.getElementById('filterICat')||{value:''}).value;
+  const sel     = document.getElementById('filterICat');
+  if (sel) {
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">TODAS AS CATEGORIAS</option>';
+    getICats().forEach(c => { const o=document.createElement('option'); o.value=c; o.textContent=c; if(c===prev) o.selected=true; sel.appendChild(o); });
+  }
+  const filtered = insumos.filter(i => {
+    const ms  = i.name.toLowerCase().includes(search);
+    const mc  = !cat || i.category === cat;
+    const low = (i.minStock > 0 && i.saldo <= i.minStock);
+    const mf  = currentIFilter === 'all' || (currentIFilter === 'low' ? low : !low);
+    return ms && mc && mf;
+  });
+  const grid = document.getElementById('insumosGrid');
+  if (!grid) return;
+  grid.innerHTML = filtered.length === 0
+    ? '<div class="empty" style="grid-column:1/-1"><div class="e-icon">📦</div><p>Nenhum insumo encontrado</p></div>'
+    : filtered.map(insumoCardHTML).join('');
+}
+
+function insumoCardHTML(i) {
+  const low     = i.minStock > 0 && i.saldo <= i.minStock && i.saldo > 0;
+  const noStock = i.saldo <= 0;
+  let cls = 'insumo-card';
+  if (noStock) cls += ' no-stock';
+  else if (low) cls += ' low-stock';
+  const badge = noStock
+    ? '<span class="status-badge badge-nostock">● SEM ESTOQUE</span>'
+    : low ? '<span class="status-badge badge-lowstock">⚠️ ESTOQUE BAIXO</span>'
+    : '<span class="status-badge badge-ok">● OK</span>';
+  const clickable = currentInsumoAction !== null;
+  const onclick = clickable ? `onclick="openInsumoAction('${i.id}')"` : `onclick="openInsumoAction('${i.id}')"`;
+  return `<div class="${cls}" ${onclick}>
+    <div class="insumo-saldo">${formatQtd(i.saldo)}</div>
+    <div class="insumo-unit">${i.unit}</div>
+    <div class="insumo-name">${i.name}</div>
+    <div class="insumo-cat">${i.category}</div>
+    <div style="margin-top:6px">${badge}</div>
+    ${i.minStock > 0 ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">Mín: ${formatQtd(i.minStock)} ${i.unit}</div>` : ''}
+  </div>`;
+}
+
+function formatQtd(n) {
+  if (!n && n !== 0) return '0';
+  const num = parseFloat(n);
+  return num % 1 === 0 ? num.toString() : num.toFixed(3).replace(/\.?0+$/, '');
+}
+
+function setIFilter(el) {
+  document.querySelectorAll('[data-ifilter]').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  currentIFilter = el.dataset.ifilter;
+  renderInsumos();
+}
+
+// ── INSUMO ACTION MODAL ───────────────────────────────────────────
+function openInsumoAction(id) {
+  const insumo = DB.insumos().find(i => String(i.id) === String(id));
+  if (!insumo) return;
+  currentInsumoId = id;
+  // Se veio da lock screen usa a ação definida, senão abre modal de escolha
+  const action = currentInsumoAction || 'entrada';
+  _openInsumoModal(insumo, action);
+}
+
+function _openInsumoModal(insumo, action) {
+  currentInsumoAction = action;
+  document.getElementById('insumoModalTitle').textContent = action === 'entrada' ? '📥 Registrar Entrada' : '📤 Registrar Saída';
+  document.getElementById('insumoModalName').textContent  = insumo.name;
+  document.getElementById('insumoSaldoAtual').textContent = formatQtd(insumo.saldo);
+  document.getElementById('insumoUnitLabel').textContent  = insumo.unit;
+  document.getElementById('insumoQtdLabel').textContent   = action === 'entrada' ? 'Quantidade recebida' : 'Quantidade utilizada';
+  document.getElementById('btnConfirmarInsumo').className = action === 'entrada' ? 'btn btn-success' : 'btn btn-danger';
+  document.getElementById('btnConfirmarInsumo').textContent = action === 'entrada' ? '📥 Confirmar Entrada' : '📤 Confirmar Saída';
+  document.getElementById('inputInsumoQtd').value = '';
+  document.getElementById('inputInsumoObs').value = '';
+  document.getElementById('inputInsumoNome').value = '';
+  selectedIEmpName = '';
+  renderIEmpGrid();
+  document.getElementById('insumoActionOverlay').classList.add('open');
+}
+
+function renderIEmpGrid() {
+  const emps = DB.emps();
+  const grid = document.getElementById('empGridInsumo');
+  if (!grid) return;
+  grid.innerHTML = emps.map(e => `<div class="emp-btn" onclick="selectIEmp(this,'${e.name}')"><span class="emp-icon">${e.icon||'👷'}</span>${e.name}</div>`).join('');
+}
+function selectIEmp(el, name) { document.querySelectorAll('#empGridInsumo .emp-btn').forEach(b=>b.classList.remove('selected')); el.classList.add('selected'); selectedIEmpName=name; document.getElementById('inputInsumoNome').value=''; }
+function clearIEmpSelection() { document.querySelectorAll('#empGridInsumo .emp-btn').forEach(b=>b.classList.remove('selected')); selectedIEmpName=''; }
+function getINome() { return selectedIEmpName || document.getElementById('inputInsumoNome').value.trim(); }
+
+async function confirmarMovInsumo() {
+  const qtdRaw = parseFloat(document.getElementById('inputInsumoQtd').value);
+  if (!qtdRaw || qtdRaw <= 0) { showToast('⚠️ Informe a quantidade'); return; }
+  const nome = getINome();
+  if (!nome) { showToast('⚠️ Informe o responsável'); return; }
+  const obs    = document.getElementById('inputInsumoObs').value.trim();
+  const insumo = DB.insumos().find(i => String(i.id) === String(currentInsumoId));
+  if (!insumo) return;
+  const action = currentInsumoAction;
+  if (action === 'saida' && qtdRaw > insumo.saldo) { showToast('⚠️ Quantidade maior que o saldo disponível'); return; }
+  const novoSaldo = action === 'entrada' ? (insumo.saldo + qtdRaw) : (insumo.saldo - qtdRaw);
+  const now = new Date().toISOString();
+  await DB.saveInsumo({ ...insumo, saldo: Math.max(0, novoSaldo) });
+  await DB.addIHistory({ type: action, insumoId: String(insumo.id), insumoName: insumo.name, unit: insumo.unit, qty: qtdRaw, saldoApos: Math.max(0, novoSaldo), by: nome, at: now, obs });
+  closeModal();
+  currentInsumoAction = null;
+  showToast(action === 'entrada' ? '📥 Entrada registrada!' : '📤 Saída registrada!');
+  // Alerta estoque baixo
+  if (novoSaldo <= insumo.minStock && insumo.minStock > 0) {
+    showToast('⚠️ ATENÇÃO: Estoque baixo em ' + insumo.name);
+  }
+}
+
+// ── INSUMOS CRUD ──────────────────────────────────────────────────
+function openAddInsumo() {
+  editingInsumoId = null; currentUnit = 'UN';
+  document.getElementById('addInsumoTitle').textContent = 'Novo Insumo';
+  ['newInsumoName','newInsumoCat','newInsumoObs'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('newInsumoMin').value = '';
+  document.getElementById('newInsumoSaldo').value = '0';
+  document.querySelectorAll('[data-unit]').forEach(e => e.classList.toggle('selected', e.dataset.unit === 'UN'));
+  document.getElementById('addInsumoOverlay').classList.add('open');
+  setTimeout(renderICatChips, 50);
+}
+
+function editInsumo(id) {
+  const i = DB.insumos().find(i => String(i.id) === String(id));
+  if (!i) return;
+  editingInsumoId = id; currentUnit = i.unit || 'UN';
+  document.getElementById('addInsumoTitle').textContent = 'Editar Insumo';
+  document.getElementById('newInsumoName').value   = i.name;
+  document.getElementById('newInsumoCat').value    = i.category;
+  document.getElementById('newInsumoMin').value    = i.minStock || '';
+  document.getElementById('newInsumoSaldo').value  = i.saldo || 0;
+  document.getElementById('newInsumoObs').value    = i.obs || '';
+  document.querySelectorAll('[data-unit]').forEach(e => e.classList.toggle('selected', e.dataset.unit === currentUnit));
+  document.getElementById('addInsumoOverlay').classList.add('open');
+  setTimeout(renderICatChips, 50);
+}
+
+function selectUnit(el) {
+  document.querySelectorAll('[data-unit]').forEach(e => e.classList.remove('selected'));
+  el.classList.add('selected');
+  currentUnit = el.dataset.unit;
+}
+
+async function saveInsumo() {
+  const name = document.getElementById('newInsumoName').value.trim();
+  const cat  = document.getElementById('newInsumoCat').value.trim();
+  if (!name || !cat) { showToast('⚠️ Preencha nome e categoria'); return; }
+  const id       = editingInsumoId || Date.now();
+  const existing = editingInsumoId ? DB.insumos().find(i => String(i.id) === String(editingInsumoId)) : null;
+  const insumo = {
+    id: String(id), name, category: cat, unit: currentUnit,
+    saldo:    parseFloat(document.getElementById('newInsumoSaldo').value) || 0,
+    minStock: parseFloat(document.getElementById('newInsumoMin').value)   || 0,
+    obs:      document.getElementById('newInsumoObs').value.trim(),
+  };
+  await DB.saveInsumo(insumo);
+  // Adiciona cat se nova
+  const icats = getICats();
+  if (!icats.includes(cat)) await DB.saveICats([...icats, cat]);
+  closeModal();
+  showToast('✅ Insumo salvo!');
+}
+
+function deleteInsumo(id) {
+  showConfirm('📦','Excluir insumo?','Esta ação não pode ser desfeita.', async () => {
+    await DB.deleteInsumo(String(id));
+    showToast('🗑 Insumo excluído');
+  });
+}
+
+// ── INSUMOS ADMIN ─────────────────────────────────────────────────
+function renderAdminInsumos() {
+  const insumos = DB.insumos();
+  const el = document.getElementById('adminInsumoList');
+  if (!el) return;
+  el.innerHTML = insumos.length === 0
+    ? '<div class="empty"><div class="e-icon">📦</div><p>Nenhum insumo</p></div>'
+    : insumos.map(i => {
+        const low = i.minStock > 0 && i.saldo <= i.minStock;
+        return `<div class="insumo-row-admin" style="${low?'border-color:#f0a500;':''}">
+          <div style="flex:1">
+            <div style="font-size:14px;font-weight:500">${i.name} <span style="color:var(--muted);font-size:12px">(${i.unit})</span></div>
+            <div style="font-size:11px;color:var(--muted)">${i.category}${i.minStock?` · Mín: ${formatQtd(i.minStock)}`:''}${low?' · <span style="color:#f0a500">⚠️ BAIXO</span>':''}</div>
+          </div>
+          <div class="insumo-row-saldo" style="${low?'color:#f0a500':''}">${formatQtd(i.saldo)}</div>
+          <div class="tool-row-actions">
+            <button class="btn-sm" onclick="editInsumo('${i.id}')">✏️</button>
+            <button class="btn-sm del" onclick="deleteInsumo('${i.id}')">🗑</button>
+          </div>
+        </div>`;
+      }).join('');
+  renderAdminICats();
+}
+
+// ── INSUMO CATS ───────────────────────────────────────────────────
+function renderAdminICats() {
+  const el = document.getElementById('adminICatList');
+  if (!el) return;
+  const all = getICats();
+  el.innerHTML = all.map(cat => `<div style="display:inline-flex;align-items:center;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:6px 14px;font-size:12px;color:var(--text2);gap:8px"><span>${cat}</span><span onclick="deleteICat('${cat}')" style="cursor:pointer;color:var(--red);font-size:14px">✕</span></div>`).join('');
+}
+
+function renderICatChips() {
+  const grid = document.getElementById('icatChipsAdmin');
+  if (!grid) return;
+  grid.innerHTML = getICats().map(cat => `<div class="chip" style="cursor:pointer;font-size:12px" onclick="selectICatChip('${cat}')">${cat}</div>`).join('');
+}
+
+function selectICatChip(cat) {
+  document.getElementById('newInsumoCat').value = cat;
+  document.querySelectorAll('#icatChipsAdmin .chip').forEach(c => c.classList.toggle('active', c.textContent === cat));
+}
+
+function openAddICat() { document.getElementById('newICatName').value=''; document.getElementById('addICatOverlay').classList.add('open'); }
+
+async function saveICat() {
+  const name = document.getElementById('newICatName').value.trim().toUpperCase();
+  if (!name) { showToast('⚠️ Informe o nome'); return; }
+  const all = getICats();
+  if (!all.includes(name)) await DB.saveICats([...all, name]);
+  closeModal(); showToast('✅ Categoria salva');
+}
+
+async function deleteICat(cat) {
+  const inUse = DB.insumos().filter(i => i.category === cat);
+  if (inUse.length > 0) { showToast('⚠️ Categoria em uso por ' + inUse.length + ' insumo(s)'); return; }
+  showConfirm('🗑','Excluir categoria?','Categoria "'+cat+'" será removida.', async () => {
+    await DB.saveICats(getICats().filter(c => c !== cat));
+    showToast('🗑 Categoria removida');
+  });
+}
+
+// ── INSUMO HISTORY ────────────────────────────────────────────────
+function renderIHistory() {
+  const history  = DB.ihistory();
+  const filtered = [...history].reverse().filter(h => currentIHFilter === 'all' || h.type === currentIHFilter);
+  const el = document.getElementById('ihistoryList');
+  if (!el) return;
+  el.innerHTML = filtered.length === 0
+    ? '<div class="empty"><div class="e-icon">📋</div><p>Nenhuma movimentação</p></div>'
+    : filtered.map(h => `
+      <div class="hist-item">
+        <div class="hist-dot ${h.type === 'entrada' ? 'devolucao' : 'retirada'}"></div>
+        <div class="hist-body">
+          <div class="hist-title">${h.insumoName}</div>
+          <div class="hist-meta">${h.type === 'entrada' ? '📥 Entrada' : '📤 Saída'} · <b>${formatQtd(h.qty)} ${h.unit}</b> · por <b>${h.by}</b> · ${fmt(h.at)}</div>
+          <div class="hist-meta">Saldo após: ${formatQtd(h.saldoApos)} ${h.unit}</div>
+          ${h.obs ? `<div style="font-size:11px;color:var(--muted);margin-top:3px">📝 ${h.obs}</div>` : ''}
+        </div>
+      </div>`).join('');
+}
+
+function setIHFilter(el) {
+  document.querySelectorAll('[data-ihf]').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  currentIHFilter = el.dataset.ihf;
+  renderIHistory();
+}
+
+// ── SERVICE WORKER ────────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js')
+      .then(reg => console.log('SW registrado:', reg.scope))
+      .catch(err => console.log('SW erro:', err));
+  });
+}
+
+// ── INSTALL PROMPT (Android) ──────────────────────────────────────
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredPrompt = e;
+  // Mostra botão de instalar no admin
+  const btn = document.getElementById('btnInstallApp');
+  if (btn) btn.style.display = 'block';
+});
+
+function installApp() {
+  if (!deferredPrompt) { showToast('App já instalado ou não disponível'); return; }
+  deferredPrompt.prompt();
+  deferredPrompt.userChoice.then(choice => {
+    if (choice.outcome === 'accepted') showToast('✅ App instalado!');
+    deferredPrompt = null;
+    const btn = document.getElementById('btnInstallApp');
+    if (btn) btn.style.display = 'none';
+  });
+}
+
+// ── NOTIFICAÇÕES ──────────────────────────────────────────────────
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) { showToast('Notificações não suportadas'); return false; }
+  if (Notification.permission === 'granted') return true;
+  const perm = await Notification.requestPermission();
+  return perm === 'granted';
+}
+
+async function showLocalNotification(title, body) {
+  const granted = await requestNotificationPermission();
+  if (!granted) return;
+  if ('serviceWorker' in navigator) {
+    const reg = await navigator.serviceWorker.ready;
+    reg.showNotification(title, {
+      body,
+      icon: 'icon-192.png',
+      badge: 'icon-192.png',
+      vibrate: [200, 100, 200],
+    });
+  } else {
+    new Notification(title, { body, icon: 'icon-192.png' });
+  }
+}
+
+// Sobrescreve sendDamageAlert para também disparar notificação local
+const _origSendDamageAlert = sendDamageAlert;
+window.sendDamageAlert = function(toolName, by, obs, at) {
+  _origSendDamageAlert(toolName, by, obs, at);
+  showLocalNotification(
+    '⚠️ Ferramenta Danificada — Sinal SP',
+    toolName + ' devolvida por ' + by + ' como DANIFICADA.'
+  );
+};
+
+</script>
+</body>
+</html>
