@@ -37,16 +37,22 @@ const app = initializeApp(FIREBASE_CONFIG);
 const db  = getFirestore(app);
 
 // ── Coleções ──
-const toolsCol   = collection(db, 'alm_tools');
-const historyCol = collection(db, 'alm_history');
-const empsCol    = collection(db, 'alm_emps');
-const catsCol    = collection(db, 'alm_cats');
+const toolsCol    = collection(db, 'alm_tools');
+const historyCol  = collection(db, 'alm_history');
+const empsCol     = collection(db, 'alm_emps');
+const catsCol     = collection(db, 'alm_cats');
+const insumosCol  = collection(db, 'alm_insumos');
+const ihistoryCol = collection(db, 'alm_ihistory');
+const icatsCol    = collection(db, 'alm_icats');
 
 // ── Cache local (alimentado pelos listeners) ──
-window._tools   = [];
-window._history = [];
-window._emps    = [];
-window._cats    = [];
+window._tools    = [];
+window._history  = [];
+window._emps     = [];
+window._cats     = [];
+window._insumos  = [];
+window._ihistory = [];
+window._icats    = [];
 
 // ── DB API exposta globalmente ──
 window.DB = {
@@ -54,6 +60,27 @@ window.DB = {
   history: () => window._history,
   emps:    () => window._emps,
   cats:    () => window._cats,
+  insumos:  () => window._insumos,
+  ihistory: () => window._ihistory,
+  icats:    () => window._icats,
+
+  saveInsumo: async (insumo) => {
+    const { id, ...data } = insumo;
+    await setDoc(doc(db, 'alm_insumos', String(id)), data);
+  },
+  deleteInsumo: async (id) => {
+    await deleteDoc(doc(db, 'alm_insumos', String(id)));
+  },
+  addIHistory: async (entry) => {
+    await addDoc(ihistoryCol, { ...entry, _ts: serverTimestamp() });
+  },
+  clearIHistory: async () => {
+    const snap = await getDocs(ihistoryCol);
+    await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+  },
+  saveICats: async (list) => {
+    await setDoc(doc(db, 'alm_icats', 'config'), { list });
+  },
 
   saveTool: async (tool) => {
     const { id, ...data } = tool;
@@ -102,7 +129,27 @@ function startListeners() {
     if (typeof renderAdmin === 'function' && document.getElementById('page-admin').classList.contains('active')) renderAdmin();
   });
 
-  // Categorias
+  // Insumos
+  onSnapshot(insumosCol, snap => {
+    window._insumos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (typeof renderInsumos === 'function') renderInsumos();
+    if (typeof renderAdminInsumos === 'function' && document.getElementById('page-admin').classList.contains('active')) renderAdminInsumos();
+  });
+
+  // Histórico Insumos
+  onSnapshot(query(ihistoryCol, orderBy('at', 'asc')), snap => {
+    window._ihistory = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (typeof renderIHistory === 'function' && document.getElementById('page-admin').classList.contains('active')) renderIHistory();
+  });
+
+  // Categorias Insumos
+  onSnapshot(doc(db, 'alm_icats', 'config'), snap => {
+    window._icats = snap.exists() ? (snap.data().list || []) : [];
+    if (typeof renderAdminICats === 'function') renderAdminICats();
+    if (typeof renderICatChips  === 'function') renderICatChips();
+  });
+
+  // Categorias Ferramentas
   onSnapshot(doc(db, 'alm_cats', 'config'), snap => {
     if (snap.exists()) {
       window._cats = snap.data().list || [];
@@ -200,8 +247,8 @@ window.showLoadingOverlay = showLoadingOverlay;
   /* LOCK SCREEN */
   #lockScreen {
     position:fixed; inset:0; z-index:2000; background:var(--bg);
-    display:flex; flex-direction:column; align-items:center; justify-content:center;
-    gap:0; padding:40px 32px;
+    display:flex; flex-direction:column; align-items:center;
+    overflow-y:auto;
   }
   .lock-logo { width:clamp(160px,40vw,300px); margin-bottom:12px; display:block; }
   .lock-logo svg { width:100%; height:auto; display:block; }
@@ -209,6 +256,8 @@ window.showLoadingOverlay = showLoadingOverlay;
   #lockStep1 { display:flex; flex-direction:column; align-items:center; gap:0; width:100%; }
   #lockStep2 { display:none; flex-direction:column; align-items:center; gap:0; width:100%; }
   .lock-header { display:flex; flex-direction:column; align-items:center; margin-bottom:40px; }
+  .lock-back-btn { background:none; border:none; color:var(--muted); font-size:12px; cursor:pointer; letter-spacing:.1em; font-family:"DM Sans"; padding:8px 20px; }
+  .lock-back-btn:hover { color:var(--text); }
   .lock-touch-area { display:flex; flex-direction:column; align-items:center; gap:16px; cursor:pointer; padding:20px; user-select:none; }
   .lock-hand-img { width:clamp(70px,18vw,110px); animation:hand-pulse 2s ease-in-out infinite; }
   .lock-hand-img svg { width:100%; height:auto; display:block; }
@@ -346,6 +395,22 @@ window.showLoadingOverlay = showLoadingOverlay;
   .empty { text-align:center; padding:52px 20px; color:var(--muted); }
   .empty .e-icon { font-size:40px; margin-bottom:14px; }
   .empty p { font-size:14px; }
+
+  .insumo-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px 14px; cursor:pointer; transition:all .2s; position:relative; overflow:hidden; user-select:none; }
+  .insumo-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:var(--accent2); }
+  .insumo-card.low-stock::before { background:#f0a500; }
+  .insumo-card.no-stock::before { background:var(--red); }
+  .insumo-card:active { transform:scale(.97); }
+  .insumo-card:hover { background:var(--surface2); border-color:var(--border2); }
+  .insumo-saldo { font-size:28px; font-weight:300; color:var(--text); line-height:1; margin-bottom:2px; }
+  .insumo-unit { font-size:12px; color:var(--muted); }
+  .insumo-name { font-size:13px; font-weight:600; color:var(--text); margin-top:8px; margin-bottom:2px; }
+  .insumo-cat { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  .badge-lowstock { background:rgba(240,165,0,.12); color:#f0a500; }
+  .badge-nostock { background:var(--red-soft); color:var(--red); }
+  .insumo-row-admin { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; display:flex; align-items:center; gap:12px; }
+  .insumo-row-saldo { font-size:18px; font-weight:600; color:var(--text); min-width:60px; text-align:right; }
+
   ::-webkit-scrollbar { width:3px; }
   ::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
   @media(max-width:440px){ .grid { grid-template-columns:repeat(2,1fr); } }
@@ -361,29 +426,74 @@ window.showLoadingOverlay = showLoadingOverlay;
 
 <!-- LOCK SCREEN -->
 <div id="lockScreen" style="display:none">
-  <div id="lockStep1">
-    <div class="lock-header">
-      <div class="lock-logo"><svg viewBox="0 0 1600 900" xmlns="http://www.w3.org/2000/svg"><g fill="white"><rect x="50" y="305" width="285" height="85" rx="12"/><rect x="75" y="330" width="235" height="35" fill="#1c1c1e"/><rect x="50" y="450" width="285" height="85" rx="12"/><rect x="75" y="475" width="235" height="35" fill="#1c1c1e"/><rect x="50" y="595" width="285" height="85" rx="12"/><rect x="75" y="620" width="235" height="35" fill="#1c1c1e"/></g><text x="420" y="470" font-family="Tenor Sans,Montserrat,Arial,sans-serif" font-size="170" font-weight="300" letter-spacing="28" fill="white">SINAL SP</text><text x="420" y="590" font-family="Tenor Sans,Montserrat,Arial,sans-serif" font-size="52" font-weight="300" letter-spacing="18" fill="white">MARCENARIA CORPORATIVA</text><text x="420" y="675" font-family="Tenor Sans,Montserrat,Arial,sans-serif" font-size="52" font-weight="300" letter-spacing="18" fill="white">E RESIDENCIAL</text></svg></div>
-      <div class="lock-brand tenor">Marcenaria Corporativa e Residencial</div>
-    </div>
-    <div class="lock-touch-area" onclick="showLockStep2()">
-      <div class="lock-hand-img"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none"><circle cx="40" cy="40" r="28" stroke="white" stroke-width="1.5" opacity="0.2"/><circle cx="40" cy="40" r="20" stroke="white" stroke-width="1.5" opacity="0.4"/><circle cx="40" cy="40" r="12" stroke="white" stroke-width="1.5" opacity="0.7"/><circle cx="40" cy="40" r="5" fill="white"/><rect x="36" y="14" width="8" height="22" rx="4" fill="white"/></svg></div>
-      <div class="lock-touch-label">TOQUE PARA INICIAR</div>
-    </div>
+
+  <!-- Logo sempre fixo no topo -->
+  <div style="display:flex;flex-direction:column;align-items:center;padding-top:clamp(40px,8vh,80px);padding-bottom:32px">
+    <div style="width:clamp(180px,45vw,320px)"><svg viewBox="0 0 1600 900" xmlns="http://www.w3.org/2000/svg"><g fill="white"><rect x="50" y="305" width="285" height="85" rx="12"/><rect x="75" y="330" width="235" height="35" fill="#1c1c1e"/><rect x="50" y="450" width="285" height="85" rx="12"/><rect x="75" y="475" width="235" height="35" fill="#1c1c1e"/><rect x="50" y="595" width="285" height="85" rx="12"/><rect x="75" y="620" width="235" height="35" fill="#1c1c1e"/></g><text x="420" y="470" font-family="Tenor Sans,Montserrat,Arial,sans-serif" font-size="170" font-weight="300" letter-spacing="28" fill="white">SINAL SP</text><text x="420" y="590" font-family="Tenor Sans,Montserrat,Arial,sans-serif" font-size="52" font-weight="300" letter-spacing="18" fill="white">MARCENARIA CORPORATIVA</text><text x="420" y="675" font-family="Tenor Sans,Montserrat,Arial,sans-serif" font-size="52" font-weight="300" letter-spacing="18" fill="white">E RESIDENCIAL</text></svg></div>
+    <div class="lock-brand tenor" style="margin-top:8px">Marcenaria Corporativa e Residencial</div>
   </div>
-  <div id="lockStep2" style="display:none">
-    <div class="lock-header">
-      <div class="lock-logo"><svg viewBox="0 0 1600 900" xmlns="http://www.w3.org/2000/svg"><g fill="white"><rect x="50" y="305" width="285" height="85" rx="12"/><rect x="75" y="330" width="235" height="35" fill="#1c1c1e"/><rect x="50" y="450" width="285" height="85" rx="12"/><rect x="75" y="475" width="235" height="35" fill="#1c1c1e"/><rect x="50" y="595" width="285" height="85" rx="12"/><rect x="75" y="620" width="235" height="35" fill="#1c1c1e"/></g><text x="420" y="470" font-family="Tenor Sans,Montserrat,Arial,sans-serif" font-size="170" font-weight="300" letter-spacing="28" fill="white">SINAL SP</text><text x="420" y="590" font-family="Tenor Sans,Montserrat,Arial,sans-serif" font-size="52" font-weight="300" letter-spacing="18" fill="white">MARCENARIA CORPORATIVA</text><text x="420" y="675" font-family="Tenor Sans,Montserrat,Arial,sans-serif" font-size="52" font-weight="300" letter-spacing="18" fill="white">E RESIDENCIAL</text></svg></div>
-      <div class="lock-brand tenor">Marcenaria Corporativa e Residencial</div>
+
+  <!-- Área de conteúdo dinâmico — só um step visível por vez -->
+  <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:0 24px;width:100%;max-width:520px;margin:0 auto">
+
+    <!-- STEP 1: Toque para iniciar -->
+    <div id="lockStep1" style="display:flex;flex-direction:column;align-items:center;gap:16px;width:100%">
+      <div class="lock-touch-area" onclick="showLockStep2()">
+        <div class="lock-hand-img"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none"><circle cx="40" cy="40" r="28" stroke="white" stroke-width="1.5" opacity="0.2"/><circle cx="40" cy="40" r="20" stroke="white" stroke-width="1.5" opacity="0.4"/><circle cx="40" cy="40" r="12" stroke="white" stroke-width="1.5" opacity="0.7"/><circle cx="40" cy="40" r="5" fill="white"/><rect x="36" y="14" width="8" height="22" rx="4" fill="white"/></svg></div>
+        <div class="lock-touch-label">TOQUE PARA INICIAR</div>
+      </div>
     </div>
-    <div class="lock-actions">
-      <div class="lock-action-card retirar" onclick="quickAction('retirar')"><div class="lock-action-label">RETIRAR FERRAMENTA</div></div>
-      <div class="lock-action-card devolver" onclick="quickAction('devolver')"><div class="lock-action-label">DEVOLVER FERRAMENTA</div></div>
+
+    <!-- STEP 2: Ferramentas ou Insumos -->
+    <div id="lockStep2" style="display:none;flex-direction:column;align-items:center;gap:20px;width:100%">
+      <div style="font-size:12px;color:var(--muted);letter-spacing:.18em;margin-bottom:4px">SELECIONE O MÓDULO</div>
+      <div class="lock-actions" style="width:100%">
+        <div class="lock-action-card" style="border-top:3px solid var(--accent2)" onclick="showLockStep3('ferramentas')">
+          <div style="font-size:28px;margin-bottom:8px">🔧</div>
+          <div class="lock-action-label">FERRAMENTAS</div>
+        </div>
+        <div class="lock-action-card" style="border-top:3px solid #7aaddd" onclick="showLockStep3('insumos')">
+          <div style="font-size:28px;margin-bottom:8px">📦</div>
+          <div class="lock-action-label">INSUMOS</div>
+        </div>
+      </div>
+      <button onclick="showLockStep1()" class="lock-back-btn">← Voltar</button>
     </div>
-    <div style="margin-top:24px"><button onclick="showLockStep1()" style="background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;letter-spacing:.1em;font-family:'DM Sans'">← Voltar</button></div>
+
+    <!-- STEP 3A: Ações Ferramentas -->
+    <div id="lockStep3Ferramentas" style="display:none;flex-direction:column;align-items:center;gap:20px;width:100%">
+      <div style="font-size:12px;color:var(--muted);letter-spacing:.18em;margin-bottom:4px">🔧 FERRAMENTAS</div>
+      <div class="lock-actions" style="width:100%">
+        <div class="lock-action-card retirar" onclick="quickAction('retirar')">
+          <div style="font-size:28px;margin-bottom:8px">📤</div>
+          <div class="lock-action-label">RETIRAR</div>
+        </div>
+        <div class="lock-action-card devolver" onclick="quickAction('devolver')">
+          <div style="font-size:28px;margin-bottom:8px">📥</div>
+          <div class="lock-action-label">DEVOLVER</div>
+        </div>
+      </div>
+      <button onclick="showLockStep2()" class="lock-back-btn">← Voltar</button>
+    </div>
+
+    <!-- STEP 3B: Ações Insumos -->
+    <div id="lockStep3Insumos" style="display:none;flex-direction:column;align-items:center;gap:20px;width:100%">
+      <div style="font-size:12px;color:var(--muted);letter-spacing:.18em;margin-bottom:4px">📦 INSUMOS</div>
+      <div class="lock-actions" style="width:100%">
+        <div class="lock-action-card devolver" onclick="quickActionInsumo('entrada')">
+          <div style="font-size:28px;margin-bottom:8px">📥</div>
+          <div class="lock-action-label">ENTRADA</div>
+        </div>
+        <div class="lock-action-card retirar" onclick="quickActionInsumo('saida')">
+          <div style="font-size:28px;margin-bottom:8px">📤</div>
+          <div class="lock-action-label">SAÍDA</div>
+        </div>
+      </div>
+      <button onclick="showLockStep2()" class="lock-back-btn">← Voltar</button>
+    </div>
+
   </div>
 </div>
-
 <!-- APP -->
 <div id="app">
   <header>
@@ -399,6 +509,7 @@ window.showLoadingOverlay = showLoadingOverlay;
 
   <div class="tabs">
     <div class="tab active" onclick="showTab('ferramentas')">🔧 FERRAMENTAS</div>
+    <div class="tab" id="tabInsumos" onclick="showTab('insumos')">📦 INSUMOS</div>
     <div class="tab" id="tabAdmin" style="display:none" onclick="showTab('admin')">⚙ ADMIN</div>
   </div>
 
@@ -415,6 +526,21 @@ window.showLoadingOverlay = showLoadingOverlay;
       <div class="chip" data-filter="out" onclick="setFilter(this)">🔴 Em uso</div>
     </div>
     <div class="grid" id="toolsGrid"></div>
+  </div>
+
+  <!-- INSUMOS -->
+  <div class="page" id="page-insumos">
+    <div class="sec-title">Estoque de insumos</div>
+    <div class="search-bar">
+      <input type="text" id="searchInsumo" placeholder="🔍 Buscar insumo..." oninput="renderInsumos()">
+      <select id="filterICat" onchange="renderInsumos()"><option value="">Todas as categorias</option></select>
+    </div>
+    <div class="chips" id="insumoChips">
+      <div class="chip active" data-ifilter="all" onclick="setIFilter(this)">Todos</div>
+      <div class="chip" data-ifilter="low" onclick="setIFilter(this)">⚠️ Estoque baixo</div>
+      <div class="chip" data-ifilter="ok" onclick="setIFilter(this)">✅ OK</div>
+    </div>
+    <div class="grid" id="insumosGrid"></div>
   </div>
 
   <!-- ADMIN -->
@@ -457,6 +583,29 @@ window.showLoadingOverlay = showLoadingOverlay;
     <div class="history-list" id="historyList" style="margin-bottom:24px"></div>
     <div class="divider"></div>
 
+
+    <!-- Insumos Admin -->
+    <div class="divider"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="font-size:15px;font-weight:600;color:var(--text)">📦 INSUMOS</div>
+      <button class="btn-sm" style="border-color:var(--accent2);color:var(--text)" onclick="openAddInsumo()">+ Novo</button>
+    </div>
+    <div style="margin-bottom:12px;display:flex;align-items:center;gap:10px">
+      <div style="font-size:13px;font-weight:600;color:var(--text)">CATEGORIAS DE INSUMOS</div>
+      <button class="btn-sm" style="border-color:var(--accent2);color:var(--text)" onclick="openAddICat()">+ NOVA</button>
+    </div>
+    <div id="adminICatList" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px"></div>
+    <div class="tool-list-admin" id="adminInsumoList"></div>
+    <div class="divider"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="font-size:15px;font-weight:600;color:var(--text)">HISTÓRICO DE INSUMOS</div>
+      <div style="display:flex;gap:8px">
+        <div class="chip active" data-ihf="all" onclick="setIHFilter(this)">TODOS</div>
+        <div class="chip" data-ihf="entrada" onclick="setIHFilter(this)">ENTRADAS</div>
+        <div class="chip" data-ihf="saida" onclick="setIHFilter(this)">SAÍDAS</div>
+      </div>
+    </div>
+    <div class="history-list" id="ihistoryList" style="margin-bottom:24px"></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <button class="btn btn-ghost" style="flex:1;min-width:140px" onclick="exportCSV()">📥 EXPORTAR CSV</button>
       <button class="btn btn-ghost" style="flex:1;min-width:140px;color:var(--red);border-color:var(--red)" onclick="clearHistory()">🗑 LIMPAR HISTÓRICO</button>
@@ -487,6 +636,81 @@ window.showLoadingOverlay = showLoadingOverlay;
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
       SAIR
     </button>
+  </div>
+</div>
+
+<!-- MODAL: INSUMO MOVIMENTAÇÃO -->
+<div class="overlay" id="insumoActionOverlay">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="insumoModalTitle">Registrar Entrada</div>
+    <div class="modal-tool-name" id="insumoModalName"></div>
+    <div id="insumoSaldoInfo" style="background:var(--bg2);border-radius:10px;padding:12px 14px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
+      <div>
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">SALDO ATUAL</div>
+        <div id="insumoSaldoAtual" style="font-size:28px;font-weight:300;color:var(--text)">0</div>
+      </div>
+      <div id="insumoUnitLabel" style="font-size:16px;color:var(--muted)">UN</div>
+    </div>
+    <div class="form-group">
+      <label id="insumoQtdLabel">Quantidade de entrada</label>
+      <input type="number" id="inputInsumoQtd" min="0.001" step="0.001" placeholder="0" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:12px 14px;border-radius:10px;font-family:'DM Sans';font-size:20px;outline:none;width:100%;transition:border-color .2s">
+    </div>
+    <div class="form-group">
+      <label>Responsável</label>
+      <div class="emp-grid" id="empGridInsumo"></div>
+      <div class="emp-name-input-wrap"><input type="text" id="inputInsumoNome" placeholder="Ou digite o nome..." autocomplete="off" oninput="clearIEmpSelection()"></div>
+    </div>
+    <div class="form-group">
+      <label>Observação (opcional)</label>
+      <textarea id="inputInsumoObs" rows="2" placeholder="Ex: NF 1234, fornecedor XYZ"></textarea>
+    </div>
+    <button class="btn btn-primary" id="btnConfirmarInsumo" onclick="confirmarMovInsumo()">✅ Confirmar</button>
+    <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">Cancelar</button>
+  </div>
+</div>
+
+<!-- MODAL: NOVO INSUMO -->
+<div class="overlay" id="addInsumoOverlay">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="addInsumoTitle">Novo Insumo</div>
+    <div class="form-group"><label>Nome do insumo</label><input type="text" id="newInsumoName" placeholder="Ex: Cola PVA, Parafuso 3/8, Tinta Branca"></div>
+    <div class="form-group">
+      <label>Categoria</label>
+      <div id="icatChipsAdmin" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px"></div>
+      <input type="text" id="newInsumoCat" placeholder="Ou digite uma nova categoria...">
+    </div>
+    <div class="form-group">
+      <label>Unidade de medida</label>
+      <div class="radio-group" style="flex-wrap:wrap">
+        <div class="radio-btn selected" data-unit="UN" onclick="selectUnit(this)">UN</div>
+        <div class="radio-btn" data-unit="KG" onclick="selectUnit(this)">KG</div>
+        <div class="radio-btn" data-unit="L" onclick="selectUnit(this)">L</div>
+        <div class="radio-btn" data-unit="m" onclick="selectUnit(this)">m</div>
+        <div class="radio-btn" data-unit="m²" onclick="selectUnit(this)">m²</div>
+        <div class="radio-btn" data-unit="cx" onclick="selectUnit(this)">cx</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Estoque mínimo (alerta)</label>
+      <input type="number" id="newInsumoMin" min="0" step="0.01" placeholder="Ex: 5" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:12px 14px;border-radius:10px;font-family:'DM Sans';font-size:15px;outline:none;width:100%">
+    </div>
+    <div class="form-group"><label>Saldo inicial</label><input type="number" id="newInsumoSaldo" min="0" step="0.001" placeholder="0" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:12px 14px;border-radius:10px;font-family:'DM Sans';font-size:15px;outline:none;width:100%"></div>
+    <div class="form-group"><label>Observações</label><textarea id="newInsumoObs" rows="2" placeholder="Ex: marca preferida, fornecedor..."></textarea></div>
+    <button class="btn btn-primary" onclick="saveInsumo()">Salvar Insumo</button>
+    <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">Cancelar</button>
+  </div>
+</div>
+
+<!-- MODAL: NOVA CATEGORIA INSUMO -->
+<div class="overlay" id="addICatOverlay">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">NOVA CATEGORIA DE INSUMO</div>
+    <div class="form-group"><label>NOME</label><input type="text" id="newICatName" placeholder="EX: COLA, FIXAÇÃO, TINTAS..."></div>
+    <button class="btn btn-primary" onclick="saveICat()">SALVAR</button>
+    <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">CANCELAR</button>
   </div>
 </div>
 
@@ -658,9 +882,8 @@ function initApp() {
   updateClock();
   setInterval(updateClock, 1000);
   // Inicializa categorias se vazio
-  if ((window._cats || []).length === 0) {
-    DB.saveCats(DEFAULT_CATS);
-  }
+  if ((window._cats || []).length === 0) DB.saveCats(DEFAULT_CATS);
+  if ((window._icats || []).length === 0) DB.saveICats(DEFAULT_ICATS);
 }
 
 // ── CLOCK ─────────────────────────────────────────────────────────
@@ -675,8 +898,18 @@ function updateClock() {
 }
 
 // ── LOCK ──────────────────────────────────────────────────────────
-function showLockStep2() { document.getElementById('lockStep1').style.display='none'; document.getElementById('lockStep2').style.display='flex'; }
-function showLockStep1() { document.getElementById('lockStep2').style.display='none'; document.getElementById('lockStep1').style.display='flex'; }
+function _hideAllSteps() {
+  ['lockStep1','lockStep2','lockStep3Ferramentas','lockStep3Insumos'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.style.display='none';
+  });
+}
+function showLockStep1() { _hideAllSteps(); document.getElementById('lockStep1').style.display='flex'; }
+function showLockStep2() { _hideAllSteps(); document.getElementById('lockStep2').style.display='flex'; }
+function showLockStep3(modulo) {
+  _hideAllSteps();
+  const id = modulo==='ferramentas' ? 'lockStep3Ferramentas' : 'lockStep3Insumos';
+  document.getElementById(id).style.display='flex';
+}
 
 function unlockApp(action) {
   document.getElementById('lockScreen').style.display = 'none';
@@ -704,7 +937,7 @@ function resetLockTimer() { clearTimeout(lockTimer); lockTimer = setTimeout(goLo
 function goLock() {
   document.getElementById('lockScreen').style.display = 'flex';
   document.getElementById('app').style.display = 'none';
-  closeModal(); pendingAction = null; currentFilter = 'all';
+  closeModal(); pendingAction = null; currentFilter = 'all'; currentInsumoAction = null;
   const tabAdmin = document.getElementById('tabAdmin');
   if(tabAdmin) tabAdmin.style.display = 'none';
   showTab('ferramentas'); showLockStep1();
@@ -714,12 +947,13 @@ document.addEventListener('click', resetLockTimer);
 
 // ── TABS ──────────────────────────────────────────────────────────
 function showTab(tab) {
-  const ids = ['ferramentas','admin'];
+  const ids = ['ferramentas','insumos','admin'];
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ids[i]===tab));
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-'+tab).classList.add('active');
-  if(tab==='admin') { renderAdmin(); renderHistory(); }
+  if(tab==='admin') { renderAdmin(); renderHistory(); renderAdminInsumos(); renderIHistory(); }
   if(tab==='ferramentas') renderTools();
+  if(tab==='insumos') renderInsumos();
 }
 
 // ── TOOL CARD ─────────────────────────────────────────────────────
@@ -928,6 +1162,7 @@ function renderAdmin() {
         </div>
       </div>`).join('');
   renderAdminCats();
+  renderAdminInsumos();
   document.getElementById('adminEmpList').innerHTML = emps.length===0
     ? '<div class="empty" style="padding:20px"><div class="e-icon">👷</div><p>Nenhum funcionário</p></div>'
     : emps.map(e=>`
@@ -1157,6 +1392,306 @@ function testAlertWhatsapp(){
   callMeBot(buildDamageMsg('Furadeira de Impacto (TESTE)','Joao Silva','Teste de alerta',fmt(new Date().toISOString())),()=>{
     showToast('📱 Teste enviado! Verifique o WhatsApp.');
   });
+}
+
+
+// ── INSUMOS STATE ─────────────────────────────────────────────────
+let currentIFilter  = 'all';
+let currentIHFilter = 'all';
+let currentInsumoId = null;
+let currentInsumoAction = null; // 'entrada' | 'saida'
+let currentUnit     = 'UN';
+let editingInsumoId = null;
+let selectedIEmpName = '';
+
+const DEFAULT_ICATS = ['🧴 Colas e Adesivos','🔩 Fixação','🎨 Tintas e Vernizes','🪵 Madeira','🧱 Acabamentos','🧹 Limpeza','⚙️ Geral'];
+
+function getICats() {
+  const saved = window._icats || [];
+  return saved.length > 0 ? saved : DEFAULT_ICATS;
+}
+
+// ── LOCK INSUMOS ──────────────────────────────────────────────────
+
+function quickActionInsumo(action) {
+  currentInsumoAction = action;
+  document.getElementById('lockScreen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  showTab('insumos');
+  resetLockTimer();
+  setTimeout(() => {
+    if (action === 'entrada') showToast('📥 Selecione o insumo para dar entrada');
+    else showToast('📤 Selecione o insumo para registrar saída');
+  }, 100);
+}
+
+// ── RENDER INSUMOS ────────────────────────────────────────────────
+function renderInsumos() {
+  const insumos = DB.insumos();
+  const search  = (document.getElementById('searchInsumo')||{value:''}).value.toLowerCase();
+  const cat     = (document.getElementById('filterICat')||{value:''}).value;
+  const sel     = document.getElementById('filterICat');
+  if (sel) {
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">TODAS AS CATEGORIAS</option>';
+    getICats().forEach(c => { const o=document.createElement('option'); o.value=c; o.textContent=c; if(c===prev) o.selected=true; sel.appendChild(o); });
+  }
+  const filtered = insumos.filter(i => {
+    const ms  = i.name.toLowerCase().includes(search);
+    const mc  = !cat || i.category === cat;
+    const low = (i.minStock > 0 && i.saldo <= i.minStock);
+    const mf  = currentIFilter === 'all' || (currentIFilter === 'low' ? low : !low);
+    return ms && mc && mf;
+  });
+  const grid = document.getElementById('insumosGrid');
+  if (!grid) return;
+  grid.innerHTML = filtered.length === 0
+    ? '<div class="empty" style="grid-column:1/-1"><div class="e-icon">📦</div><p>Nenhum insumo encontrado</p></div>'
+    : filtered.map(insumoCardHTML).join('');
+}
+
+function insumoCardHTML(i) {
+  const low     = i.minStock > 0 && i.saldo <= i.minStock && i.saldo > 0;
+  const noStock = i.saldo <= 0;
+  let cls = 'insumo-card';
+  if (noStock) cls += ' no-stock';
+  else if (low) cls += ' low-stock';
+  const badge = noStock
+    ? '<span class="status-badge badge-nostock">● SEM ESTOQUE</span>'
+    : low ? '<span class="status-badge badge-lowstock">⚠️ ESTOQUE BAIXO</span>'
+    : '<span class="status-badge badge-ok">● OK</span>';
+  const clickable = currentInsumoAction !== null;
+  const onclick = clickable ? `onclick="openInsumoAction('${i.id}')"` : `onclick="openInsumoAction('${i.id}')"`;
+  return `<div class="${cls}" ${onclick}>
+    <div class="insumo-saldo">${formatQtd(i.saldo)}</div>
+    <div class="insumo-unit">${i.unit}</div>
+    <div class="insumo-name">${i.name}</div>
+    <div class="insumo-cat">${i.category}</div>
+    <div style="margin-top:6px">${badge}</div>
+    ${i.minStock > 0 ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">Mín: ${formatQtd(i.minStock)} ${i.unit}</div>` : ''}
+  </div>`;
+}
+
+function formatQtd(n) {
+  if (!n && n !== 0) return '0';
+  const num = parseFloat(n);
+  return num % 1 === 0 ? num.toString() : num.toFixed(3).replace(/\.?0+$/, '');
+}
+
+function setIFilter(el) {
+  document.querySelectorAll('[data-ifilter]').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  currentIFilter = el.dataset.ifilter;
+  renderInsumos();
+}
+
+// ── INSUMO ACTION MODAL ───────────────────────────────────────────
+function openInsumoAction(id) {
+  const insumo = DB.insumos().find(i => String(i.id) === String(id));
+  if (!insumo) return;
+  currentInsumoId = id;
+  // Se veio da lock screen usa a ação definida, senão abre modal de escolha
+  const action = currentInsumoAction || 'entrada';
+  _openInsumoModal(insumo, action);
+}
+
+function _openInsumoModal(insumo, action) {
+  currentInsumoAction = action;
+  document.getElementById('insumoModalTitle').textContent = action === 'entrada' ? '📥 Registrar Entrada' : '📤 Registrar Saída';
+  document.getElementById('insumoModalName').textContent  = insumo.name;
+  document.getElementById('insumoSaldoAtual').textContent = formatQtd(insumo.saldo);
+  document.getElementById('insumoUnitLabel').textContent  = insumo.unit;
+  document.getElementById('insumoQtdLabel').textContent   = action === 'entrada' ? 'Quantidade recebida' : 'Quantidade utilizada';
+  document.getElementById('btnConfirmarInsumo').className = action === 'entrada' ? 'btn btn-success' : 'btn btn-danger';
+  document.getElementById('btnConfirmarInsumo').textContent = action === 'entrada' ? '📥 Confirmar Entrada' : '📤 Confirmar Saída';
+  document.getElementById('inputInsumoQtd').value = '';
+  document.getElementById('inputInsumoObs').value = '';
+  document.getElementById('inputInsumoNome').value = '';
+  selectedIEmpName = '';
+  renderIEmpGrid();
+  document.getElementById('insumoActionOverlay').classList.add('open');
+}
+
+function renderIEmpGrid() {
+  const emps = DB.emps();
+  const grid = document.getElementById('empGridInsumo');
+  if (!grid) return;
+  grid.innerHTML = emps.map(e => `<div class="emp-btn" onclick="selectIEmp(this,'${e.name}')"><span class="emp-icon">${e.icon||'👷'}</span>${e.name}</div>`).join('');
+}
+function selectIEmp(el, name) { document.querySelectorAll('#empGridInsumo .emp-btn').forEach(b=>b.classList.remove('selected')); el.classList.add('selected'); selectedIEmpName=name; document.getElementById('inputInsumoNome').value=''; }
+function clearIEmpSelection() { document.querySelectorAll('#empGridInsumo .emp-btn').forEach(b=>b.classList.remove('selected')); selectedIEmpName=''; }
+function getINome() { return selectedIEmpName || document.getElementById('inputInsumoNome').value.trim(); }
+
+async function confirmarMovInsumo() {
+  const qtdRaw = parseFloat(document.getElementById('inputInsumoQtd').value);
+  if (!qtdRaw || qtdRaw <= 0) { showToast('⚠️ Informe a quantidade'); return; }
+  const nome = getINome();
+  if (!nome) { showToast('⚠️ Informe o responsável'); return; }
+  const obs    = document.getElementById('inputInsumoObs').value.trim();
+  const insumo = DB.insumos().find(i => String(i.id) === String(currentInsumoId));
+  if (!insumo) return;
+  const action = currentInsumoAction;
+  if (action === 'saida' && qtdRaw > insumo.saldo) { showToast('⚠️ Quantidade maior que o saldo disponível'); return; }
+  const novoSaldo = action === 'entrada' ? (insumo.saldo + qtdRaw) : (insumo.saldo - qtdRaw);
+  const now = new Date().toISOString();
+  await DB.saveInsumo({ ...insumo, saldo: Math.max(0, novoSaldo) });
+  await DB.addIHistory({ type: action, insumoId: String(insumo.id), insumoName: insumo.name, unit: insumo.unit, qty: qtdRaw, saldoApos: Math.max(0, novoSaldo), by: nome, at: now, obs });
+  closeModal();
+  currentInsumoAction = null;
+  showToast(action === 'entrada' ? '📥 Entrada registrada!' : '📤 Saída registrada!');
+  // Alerta estoque baixo
+  if (novoSaldo <= insumo.minStock && insumo.minStock > 0) {
+    showToast('⚠️ ATENÇÃO: Estoque baixo em ' + insumo.name);
+  }
+}
+
+// ── INSUMOS CRUD ──────────────────────────────────────────────────
+function openAddInsumo() {
+  editingInsumoId = null; currentUnit = 'UN';
+  document.getElementById('addInsumoTitle').textContent = 'Novo Insumo';
+  ['newInsumoName','newInsumoCat','newInsumoObs'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('newInsumoMin').value = '';
+  document.getElementById('newInsumoSaldo').value = '0';
+  document.querySelectorAll('[data-unit]').forEach(e => e.classList.toggle('selected', e.dataset.unit === 'UN'));
+  document.getElementById('addInsumoOverlay').classList.add('open');
+  setTimeout(renderICatChips, 50);
+}
+
+function editInsumo(id) {
+  const i = DB.insumos().find(i => String(i.id) === String(id));
+  if (!i) return;
+  editingInsumoId = id; currentUnit = i.unit || 'UN';
+  document.getElementById('addInsumoTitle').textContent = 'Editar Insumo';
+  document.getElementById('newInsumoName').value   = i.name;
+  document.getElementById('newInsumoCat').value    = i.category;
+  document.getElementById('newInsumoMin').value    = i.minStock || '';
+  document.getElementById('newInsumoSaldo').value  = i.saldo || 0;
+  document.getElementById('newInsumoObs').value    = i.obs || '';
+  document.querySelectorAll('[data-unit]').forEach(e => e.classList.toggle('selected', e.dataset.unit === currentUnit));
+  document.getElementById('addInsumoOverlay').classList.add('open');
+  setTimeout(renderICatChips, 50);
+}
+
+function selectUnit(el) {
+  document.querySelectorAll('[data-unit]').forEach(e => e.classList.remove('selected'));
+  el.classList.add('selected');
+  currentUnit = el.dataset.unit;
+}
+
+async function saveInsumo() {
+  const name = document.getElementById('newInsumoName').value.trim();
+  const cat  = document.getElementById('newInsumoCat').value.trim();
+  if (!name || !cat) { showToast('⚠️ Preencha nome e categoria'); return; }
+  const id       = editingInsumoId || Date.now();
+  const existing = editingInsumoId ? DB.insumos().find(i => String(i.id) === String(editingInsumoId)) : null;
+  const insumo = {
+    id: String(id), name, category: cat, unit: currentUnit,
+    saldo:    parseFloat(document.getElementById('newInsumoSaldo').value) || 0,
+    minStock: parseFloat(document.getElementById('newInsumoMin').value)   || 0,
+    obs:      document.getElementById('newInsumoObs').value.trim(),
+  };
+  await DB.saveInsumo(insumo);
+  // Adiciona cat se nova
+  const icats = getICats();
+  if (!icats.includes(cat)) await DB.saveICats([...icats, cat]);
+  closeModal();
+  showToast('✅ Insumo salvo!');
+}
+
+function deleteInsumo(id) {
+  showConfirm('📦','Excluir insumo?','Esta ação não pode ser desfeita.', async () => {
+    await DB.deleteInsumo(String(id));
+    showToast('🗑 Insumo excluído');
+  });
+}
+
+// ── INSUMOS ADMIN ─────────────────────────────────────────────────
+function renderAdminInsumos() {
+  const insumos = DB.insumos();
+  const el = document.getElementById('adminInsumoList');
+  if (!el) return;
+  el.innerHTML = insumos.length === 0
+    ? '<div class="empty"><div class="e-icon">📦</div><p>Nenhum insumo</p></div>'
+    : insumos.map(i => {
+        const low = i.minStock > 0 && i.saldo <= i.minStock;
+        return `<div class="insumo-row-admin" style="${low?'border-color:#f0a500;':''}">
+          <div style="flex:1">
+            <div style="font-size:14px;font-weight:500">${i.name} <span style="color:var(--muted);font-size:12px">(${i.unit})</span></div>
+            <div style="font-size:11px;color:var(--muted)">${i.category}${i.minStock?` · Mín: ${formatQtd(i.minStock)}`:''}${low?' · <span style="color:#f0a500">⚠️ BAIXO</span>':''}</div>
+          </div>
+          <div class="insumo-row-saldo" style="${low?'color:#f0a500':''}">${formatQtd(i.saldo)}</div>
+          <div class="tool-row-actions">
+            <button class="btn-sm" onclick="editInsumo('${i.id}')">✏️</button>
+            <button class="btn-sm del" onclick="deleteInsumo('${i.id}')">🗑</button>
+          </div>
+        </div>`;
+      }).join('');
+  renderAdminICats();
+}
+
+// ── INSUMO CATS ───────────────────────────────────────────────────
+function renderAdminICats() {
+  const el = document.getElementById('adminICatList');
+  if (!el) return;
+  const all = getICats();
+  el.innerHTML = all.map(cat => `<div style="display:inline-flex;align-items:center;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:6px 14px;font-size:12px;color:var(--text2);gap:8px"><span>${cat}</span><span onclick="deleteICat('${cat}')" style="cursor:pointer;color:var(--red);font-size:14px">✕</span></div>`).join('');
+}
+
+function renderICatChips() {
+  const grid = document.getElementById('icatChipsAdmin');
+  if (!grid) return;
+  grid.innerHTML = getICats().map(cat => `<div class="chip" style="cursor:pointer;font-size:12px" onclick="selectICatChip('${cat}')">${cat}</div>`).join('');
+}
+
+function selectICatChip(cat) {
+  document.getElementById('newInsumoCat').value = cat;
+  document.querySelectorAll('#icatChipsAdmin .chip').forEach(c => c.classList.toggle('active', c.textContent === cat));
+}
+
+function openAddICat() { document.getElementById('newICatName').value=''; document.getElementById('addICatOverlay').classList.add('open'); }
+
+async function saveICat() {
+  const name = document.getElementById('newICatName').value.trim().toUpperCase();
+  if (!name) { showToast('⚠️ Informe o nome'); return; }
+  const all = getICats();
+  if (!all.includes(name)) await DB.saveICats([...all, name]);
+  closeModal(); showToast('✅ Categoria salva');
+}
+
+async function deleteICat(cat) {
+  const inUse = DB.insumos().filter(i => i.category === cat);
+  if (inUse.length > 0) { showToast('⚠️ Categoria em uso por ' + inUse.length + ' insumo(s)'); return; }
+  showConfirm('🗑','Excluir categoria?','Categoria "'+cat+'" será removida.', async () => {
+    await DB.saveICats(getICats().filter(c => c !== cat));
+    showToast('🗑 Categoria removida');
+  });
+}
+
+// ── INSUMO HISTORY ────────────────────────────────────────────────
+function renderIHistory() {
+  const history  = DB.ihistory();
+  const filtered = [...history].reverse().filter(h => currentIHFilter === 'all' || h.type === currentIHFilter);
+  const el = document.getElementById('ihistoryList');
+  if (!el) return;
+  el.innerHTML = filtered.length === 0
+    ? '<div class="empty"><div class="e-icon">📋</div><p>Nenhuma movimentação</p></div>'
+    : filtered.map(h => `
+      <div class="hist-item">
+        <div class="hist-dot ${h.type === 'entrada' ? 'devolucao' : 'retirada'}"></div>
+        <div class="hist-body">
+          <div class="hist-title">${h.insumoName}</div>
+          <div class="hist-meta">${h.type === 'entrada' ? '📥 Entrada' : '📤 Saída'} · <b>${formatQtd(h.qty)} ${h.unit}</b> · por <b>${h.by}</b> · ${fmt(h.at)}</div>
+          <div class="hist-meta">Saldo após: ${formatQtd(h.saldoApos)} ${h.unit}</div>
+          ${h.obs ? `<div style="font-size:11px;color:var(--muted);margin-top:3px">📝 ${h.obs}</div>` : ''}
+        </div>
+      </div>`).join('');
+}
+
+function setIHFilter(el) {
+  document.querySelectorAll('[data-ihf]').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  currentIHFilter = el.dataset.ihf;
+  renderIHistory();
 }
 
 // ── SERVICE WORKER ────────────────────────────────────────────────
